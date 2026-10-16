@@ -101,8 +101,9 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 8. **[perf] Runtime unknown.** Batch-1 decoding with `output_hidden_states=True` on every step is
    slow. Time the n=5 sanity runs and extrapolate before committing to the full grid. Any speed-up
    (e.g. requesting hidden states only during latent steps) must not change outputs; prove it with
-   a test comparing outputs before/after. Local M4 (MPS) timings per problem, 3B: single_cot ≈ 25 s,
-   latent_mas ≈ 10–30 s; 1.5B text_mas ≈ 214 s on CPU. Kaggle T4 timings still needed.
+   a test comparing outputs before/after. Measured 2026-10-16, Apple M4 (MPS, fp16), Qwen2.5-3B, mean per problem
+   over 3 problems: single_cot 42 s, text_mas 149 s, latent_mas m10 24 s, hetero_mas 54 s.
+   Kaggle T4 timings still needed before planning T5.
 9. **[fixed 2026-10-16] hetero device placement.** `run.py --device_b cuda:1` puts `model_b` on a
    second GPU; `_Timer` now syncs every device used and sums peak memory over GPUs.
 
@@ -155,3 +156,7 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   `.config.json` now also records device and transformers version.
 - 2026-10-16: Issue 4 investigation (no code change to the method): latent thinking degrades at
   m=10 on Qwen2.5 1.5B/3B but not on Qwen3-4B; see issue 4. Model/m choice is open for the human.
+- 2026-10-16: End-to-end smoke test passed (MPS, Qwen2.5-3B, n=3, not results): every method and
+  ablation flag, a dev-split run, fit_adapter (1.5B->3B, 100 texts: held-out cosine 0.676),
+  hetero_mas, and analyze (table + ablation plot). text_mas agents hit the 256 cap 56% of the time.
+  latent_mas m10 junk on 3/3 (issue 4); m0 `drop` and hetero_mas coherent 3/3.

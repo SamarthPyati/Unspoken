@@ -1,0 +1,9 @@
+# Pin exact versions with `pip freeze > requirements.lock` once tests pass.
+torch>=2.2
+transformers>=4.45
+datasets>=2.18
+numpy
+scipy
+matplotlib
+tqdm
+pytest

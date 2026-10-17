@@ -21,10 +21,11 @@ own extension.
 
 | | |
 |---|---|
-| Tests | `pytest` green: 21 tests, including the KV-cache mechanics tests |
+| Tests | `pytest` green: 23 tests, including the KV-cache mechanics tests |
 | End-to-end | Every method and script runs end to end on Qwen2.5-3B (Apple M4, MPS) |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
 | **Open finding** | `latent_mas` is coherent at small `m` (1–5) on Qwen2.5-3B but **degrades at the default `m=10`** and breaks at any `m ≥ 1` on 1.5B. It stays coherent on Qwen3-4B (the reference's model family), so the code is correct; the model and `m` choice is a decision for the team. See HANDOFF issue 4. |
+| Demo | `python -m scripts.demo`: Gradio side-by-side of text vs latent MAS (T10) |
 | Still to do | Kaggle T4 run of the tests + `requirements.lock` (T1); dev sweep (T6); final runs (T7) |
 
 ---
@@ -165,6 +166,28 @@ python -m scripts.run --method hetero_mas --n 5 --model Qwen/Qwen2.5-1.5B-Instru
 Fit on GSM8K train only. Report the held-out cosine it prints. Near 0 means the map is broken;
 a decent cosine with no accuracy gain is a legitimate negative result.
 
+### Live demo (side by side)
+
+```bash
+python -m scripts.demo --precompute 3 --latent_steps 1    # optional: cache 3 questions first
+python -m scripts.demo                                     # opens http://127.0.0.1:7860
+python -m scripts.demo --share                             # public gradio.live link (e.g. from Kaggle)
+```
+
+Pick a GSM8K question (or type one), set `m` and the realign mode, and press **Compare**. Latent MAS
+runs first (seconds), then text MAS (minutes on a laptop). The table shows the answer, output tokens,
+forward passes, latent steps, prompt tokens and latency for both, with the relative change. Below it
+you get each judger's answer, the text agents' messages, and the size of the latent message
+(cache positions).
+
+- Both columns run through the experiment's own `pipelines.text_mas` / `latent_mas`, so the demo
+  shows exactly what is measured.
+- Results are cached in `cache/demo_results.json`. For a live session, precompute the questions you
+  will show; text MAS is cached once and reused for every `m`.
+- Show `m=1` (coherent on Qwen2.5-3B) **and** `m=10` (the experiment default, which degrades on
+  Qwen2.5). Showing only the good setting would be cherry-picking.
+- One question illustrates the mechanism. It is not evidence for H1; that comes from `scripts.analyze`.
+
 ---
 
 ## Guidance: rules that keep the results valid
@@ -224,6 +247,7 @@ scripts/
   run.py         run one method on one slice, resumable JSONL output
   fit_adapter.py fit the cross-model map on GSM8K train
   analyze.py     results table, significance, truncation rate, ablation plot
+  demo.py        Gradio app: text vs latent MAS side by side, with metrics
 tests/           pytest: data, metrics, mechanics (tiny random model), script guards
 spec/            CLAUDE.md, HANDOFF.md, docs/RESEARCH_CONTEXT.md
 ```

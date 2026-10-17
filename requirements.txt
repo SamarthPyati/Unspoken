@@ -7,3 +7,4 @@ scipy
 matplotlib
 tqdm
 pytest
+gradio>=4.0          # demo only (scripts/demo.py); not needed for experiments

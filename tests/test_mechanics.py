@@ -171,3 +171,43 @@ def test_timer_on_cpu():
     with _Timer(torch.device("cpu"), torch.device("cpu")) as t:
         pass
     assert t.seconds >= 0 and t.peak_mb == 0.0
+
+
+def test_demo_runs_both_methods_and_caches(tiny, tmp_path, monkeypatch):
+    """scripts/demo.py: runs the experiment's own pipelines, scores with the one scorer,
+    and a cached replay returns the identical result."""
+    from scripts import demo as d
+    import src.modeling as modeling
+
+    model, _ = tiny
+    monkeypatch.setattr(d, "build_realign",
+                        lambda m, mode: modeling.build_realign(m, mode=mode, cache_dir=str(tmp_path)))
+    app = d.Demo(model, FakeChatTokenizer(), "tiny", d.ResultCache(str(tmp_path / "c.json")),
+                 {"max_new_tokens": 4, "agent_max_tokens": 4})
+    cfg = d.make_cfg(2, max_new_tokens=4, agent_max_tokens=4)
+    q = "Tom has 3 apples and buys 2 more. How many?"
+    lat = app.run("latent_mas", q, "5", cfg, "full")
+    txt = app.run("text_mas", q, "5", cfg, "full")
+    assert not lat["cached"] and lat["latent_steps"] == 2 * 3 and lat["correct"] in (True, False)
+    assert txt["latent_steps"] == 0 and len(txt["per_agent_tokens"]) == 4
+
+    again = d.Demo(model, FakeChatTokenizer(), "tiny", d.ResultCache(str(tmp_path / "c.json")),
+                   app.defaults).run("latent_mas", q, "5", cfg, "full")
+    assert again["cached"] and again["output"] == lat["output"]
+
+    rows = d.comparison_rows(txt, lat)
+    assert [r[0] for r in rows][:3] == ["Answer", "Output tokens", "Forward passes"]
+    assert all(len(r) == 4 for r in rows)
+    assert "per agent" in d.latent_message(lat, 2)
+    assert "Planner" in d.text_transcript(txt)
+
+
+def test_demo_ui_builds(tiny, tmp_path):
+    gr = pytest.importorskip("gradio")
+    from scripts import demo as d
+
+    model, _ = tiny
+    app = d.Demo(model, FakeChatTokenizer(), "tiny", d.ResultCache(str(tmp_path / "c.json")),
+                 {"max_new_tokens": 4, "agent_max_tokens": 4})
+    ui = d.build_ui(app, [{"id": "x-0", "question": "What is 2+3?", "gold": "5"}], 5, "full")
+    assert isinstance(ui, gr.Blocks)

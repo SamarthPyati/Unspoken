@@ -21,7 +21,7 @@ and every script against a model. Treat the first session as debugging, not expe
 | `src/pipelines.py` | Written; never executed |
 | `src/adapter.py`, `scripts/fit_adapter.py` | Written; never executed (stretch goal) |
 | `scripts/run.py`, `scripts/analyze.py` | Written; `analyze.py` never run on real output |
-| Gradio demo (side-by-side text vs latent, tokens saved) | **Not started** |
+| Gradio demo (side-by-side text vs latent, tokens saved) | `scripts/demo.py`; tested (`test_demo_*`), run on 3B locally |
 | `requirements.lock` | **Not created**; do this after the first green test run |
 
 ## Provenance: what matches the reference and what doesn't
@@ -120,7 +120,7 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 | T7 | Final runs | Chosen settings on the full GSM8K test set (1,319) for 3B; repeat main rows on 1.5B |
 | T8 | Stretch: adapter | `fit_adapter` held-out cosine reported. Near 0 = broken map (debug); decent cosine with no accuracy gain = legitimate negative result |
 | T9 | Analysis | `analyze.py` table with CIs, McNemar p, % tokens saved, forward passes, latency; ablation plot |
-| T10 | Demo | Gradio app: same question, text MAS vs latent MAS side by side, token and forward-pass counts |
+| T10 | Demo (done 2026-10-17: `python -m scripts.demo`) | Gradio app: same question, text MAS vs latent MAS side by side, token and forward-pass counts |
 
 ## Open questions for the human (ask; don't guess)
 
@@ -160,3 +160,7 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   ablation flag, a dev-split run, fit_adapter (1.5B->3B, 100 texts: held-out cosine 0.676),
   hetero_mas, and analyze (table + ablation plot). text_mas agents hit the 256 cap 56% of the time.
   latent_mas m10 junk on 3/3 (issue 4); m0 `drop` and hetero_mas coherent 3/3.
+- 2026-10-17: T10 demo: `scripts/demo.py` (Gradio). Runs the experiment's own `text_mas` /
+  `latent_mas`, scores with `data.extract_prediction`/`is_correct`, shows all four metrics side
+  by side, caches results in `cache/demo_results.json`. Demo only; does not write to `results/`.
+  New dependency `gradio` (demo only).

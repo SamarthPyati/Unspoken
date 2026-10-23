@@ -53,7 +53,8 @@ def main():
         raise SystemExit("no problem id is shared by every run; nothing to compare")
     base = runs.get(args.baseline)
 
-    header = f"{'run':32s} {'acc [95% CI]':22s} {'out tok':>8s} {'fwd':>6s} {'sec':>6s} {'vs base: dAcc, p, tok saved'}"
+    header = (f"{'run':32s} {'acc [95% CI]':22s} {'boxed':>5s} {'out tok':>8s} {'fwd':>6s} {'sec':>6s} "
+              f"{'vs base: dAcc, p, tok saved'}")
     print(header + "\n" + "-" * len(header))
     for name, r in runs.items():
         acc = [r[i]["correct"] for i in common]
@@ -61,7 +62,10 @@ def main():
         tok = [r[i]["output_tokens"] for i in common]
         fwd = [r[i]["forward_passes"] for i in common]
         sec = [r[i]["latency_s"] for i in common]
-        line = (f"{name:32s} {ci['mean']:.3f} [{ci['lo']:.3f},{ci['hi']:.3f}]   "
+        # Share of answers with a \boxed{}: the quickest signal that a judger's text is
+        # degenerate (HANDOFF issue 4); a low rate means "read the outputs".
+        boxed = sum("\\boxed{" in r[i].get("output", "") for i in common) / len(common)
+        line = (f"{name:32s} {ci['mean']:.3f} [{ci['lo']:.3f},{ci['hi']:.3f}]   {boxed:5.0%} "
                 f"{sum(tok)/len(tok):8.1f} {sum(fwd)/len(fwd):6.0f} {sum(sec)/len(sec):6.2f}")
         if name.startswith("text_mas"):
             tr = truncation_rate([r[i] for i in common], caps[name])

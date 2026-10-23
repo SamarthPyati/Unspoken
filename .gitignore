@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 .pytest_cache/
 dist/
+.DS_Store
+unspoken_kaggle_*.zip

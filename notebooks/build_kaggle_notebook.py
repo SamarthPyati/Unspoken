@@ -157,6 +157,10 @@ def lane(gpu, jobs):
         status[args] = rc
         print(f"[GPU {gpu}] {'ok ' if rc == 0 else 'FAIL'} {time.time() - t:6.0f}s  {args}", flush=True)
 
+# Exclusive GPUs, or nothing: leftover runs from an earlier execution would cause OOM and wrong timings.
+busy = subprocess.run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader",
+                      shell=True, capture_output=True, text=True).stdout.strip()
+assert not busy, "GPUs already in use (stop them with !pkill -f scripts.run, or restart):\n" + busy
 threads = [threading.Thread(target=lane, args=(g, j)) for g, j in LANES.items()]
 [t.start() for t in threads]; [t.join() for t in threads]
 failed = [a for a, rc in status.items() if rc != 0]

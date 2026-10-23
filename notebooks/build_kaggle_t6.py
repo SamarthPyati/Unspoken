@@ -35,7 +35,11 @@ Expected: **~7.6 h** on 2x T4 (from the T3 timings), so one session.
 
 **Before you run.** Use the same settings as the T1/T3/T5 notebook: **GPU T4 x2**, **Internet on**,
 and the code as a `.bundle` input or `REPO_URL`. Then **Save Version → Save & Run All (Commit)**, so
-it runs in the background without the browser open.
+it runs in the background, on a fresh machine, without the browser open.
+
+**Run it once per session.** Don't press *Run All* again in an interactive session while runs are
+going: earlier runs keep their GPUs even after a re-run or restart, the new ones run out of memory,
+and any timings measured meanwhile are wrong. The grid cell now refuses to start if the GPUs are busy.
 
 **If the session ends early**, nothing is lost: every problem is written as it finishes. Add this
 notebook's output (or the zip) as an input to a new session and run again. It copies the finished
@@ -136,6 +140,18 @@ LANES = {g: sorted((j for j in jobs if j["lane"] == g), key=lambda j: PRIORITY.i
 for g, js in LANES.items():
     print(f"GPU {g} (~{lanes[g]:.1f} h): " + ", ".join(j["tag"] for j in js))
 
+# Exclusive GPUs, or nothing. Runs left over from an earlier execution of this cell keep running
+# after a re-run or kernel restart; sharing a T4 with them runs out of memory and, worse, inflates
+# latency (one of the four metrics). Seen on 2026-10-23: three 3B processes per GPU, all OOM.
+alive = [p for p in globals().get("_T6_PROCS", []) if p.poll() is None]
+assert not alive, (f"{len(alive)} run(s) from an earlier execution of this cell are still going. "
+                   "Let them finish, or stop them with: !pkill -f scripts.run")
+busy = subprocess.run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader",
+                      shell=True, capture_output=True, text=True).stdout.strip()
+assert not busy, ("The GPUs are already in use, so timings would be wrong:\n" + busy +
+                  "\nStop those processes (e.g. !pkill -f scripts.run) or restart the session, then rerun.")
+_T6_PROCS = []
+
 os.makedirs(f"{WORK}/logs", exist_ok=True)
 status = {}
 
@@ -150,6 +166,7 @@ def lane(gpu, jobs):
             f.write(f"# {cmd}\n"); f.flush()
             p = subprocess.Popen(cmd, shell=True, cwd=WORK, stdout=f, stderr=subprocess.STDOUT,
                                  env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)})
+            _T6_PROCS.append(p)
             try:
                 rc = p.wait(timeout=max(60, hours_left() * 3600))
             except subprocess.TimeoutExpired:
@@ -162,7 +179,10 @@ threads = [threading.Thread(target=lane, args=(g, js)) for g, js in LANES.items(
 print(f"\ngrid finished or budget reached after {(time.time() - T0) / 3600:.2f} h")
 failed = {k: v for k, v in status.items() if v not in (0,) and not str(v).startswith(("skipped", "stopped"))}
 if failed:
-    print("FAILED (see logs/):", failed)
+    print("\n" + "!" * 70 + f"\nRUNS FAILED (see logs/; the tail of each is shown below): {failed}\n" + "!" * 70)
+    for path in sorted(glob.glob(f"{WORK}/logs/t6_*.log")):
+        if any(path.endswith(f"_{tag}.log") for tag in failed):
+            print(f"\n--- {os.path.basename(path)}\n" + "".join(open(path).readlines()[-3:]))
 """)
 
 md("""
@@ -173,8 +193,11 @@ chooses `m`; it refuses to choose until every latent run has the full 300 proble
 """)
 
 code(r"""
-r = sh(f"python -m scripts.analyze --dir {RUN_DIR} --baseline text_mas_seed0", capture_output=True)
-print(r.stdout); open(f"{WORK}/t6_analysis.txt", "w").write(r.stdout)
+# check=False: with no results (e.g. every run failed) we still want to reach packaging,
+# so the logs get downloaded.
+r = sh(f"python -m scripts.analyze --dir {RUN_DIR} --baseline text_mas_seed0", check=False,
+       capture_output=True)
+print(r.stdout, r.stderr); open(f"{WORK}/t6_analysis.txt", "w").write(r.stdout + r.stderr)
 sel = sh(f"python -m scripts.select_m --dir {RUN_DIR}", check=False, capture_output=True)
 print(sel.stdout, sel.stderr); open(f"{WORK}/t6_select_m.txt", "w").write(sel.stdout + sel.stderr)
 import re
@@ -207,6 +230,10 @@ out = "/kaggle/working/unspoken_kaggle_T6.zip"
 sh(f"rm -f {out} && zip -qr {out} results logs t6_analysis.txt t6_select_m.txt t7_plan.md")
 print(f"wrote {out} ({os.path.getsize(out) / 2**20:.1f} MB)\n")
 commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=WORK, text=True).strip()
+if failed:
+    # No change-log line for a broken run: it must not read like a result.
+    raise RuntimeError(f"T6 DID NOT COMPLETE: runs failed {failed}. The zip holds the logs for "
+                       "debugging; do not use its results (and do not resume from them).")
 print("---- paste into spec/HANDOFF.md (Change log) ----")
 print(f"- {time.strftime('%Y-%m-%d')}: T6 dev sweep on Kaggle 2x T4 ({MODEL.split('/')[-1]}, train offset {DEV_OFFSET}, "
       f"n={N_DEV}, commit {commit}); {(time.time() - T0) / 3600:.1f} h. Pre-registered rule chose "

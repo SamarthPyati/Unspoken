@@ -203,3 +203,15 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 - 2026-10-23: `analyze.py` prints a `\boxed{}` rate per run (coherence signal, issue 4).
 - 2026-10-23: `notebooks/kaggle_T6_dev.ipynb` (+ builder): T6 grid on both GPUs, decision rows first,
   11 h budget guard, resume from a previous session's output, then analyze + select_m + T7 plan.
+- 2026-10-23: **T6 attempt 1 failed; its results are void.** Commit 755b801, Kaggle 2x T4. All 13 runs
+  exited with CUDA OOM: each GPU held two other 3B processes (~6.3 GB each) from an earlier execution
+  of the same notebook in the interactive session (result configs started 14:47, before the failing
+  run), so three 3B models competed for one 15 GB T4. Partial rows (m1 98, text_mas 25, m0 15, m2 11,
+  single_cot 9, m3 9 problems) have no duplicate ids, but their **latencies are contaminated**
+  (single_cot 32–35 s/problem vs 12.9 s in T3), so they were not imported and must not be resumed from.
+  The notebook's own change-log line ("m = None", all status 1) is superseded by this entry.
+  Fix: the grid cell now refuses to start if `nvidia-smi` shows any compute process or a run from an
+  earlier execution is still alive; failed runs print their log tails, the logs are still zipped, and
+  the notebook raises "T6 DID NOT COMPLETE" instead of printing a change-log line. Same GPU guard in
+  the T1/T3/T5 notebook. Verified by local dry runs: busy GPU (refuses), failing runs (raises, logs
+  zipped), normal run (completes). Next: rerun T6 from empty with Save & Run All (Commit).

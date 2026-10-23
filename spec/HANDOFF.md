@@ -111,7 +111,9 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 8. **[perf] Runtime unknown.** Batch-1 decoding with `output_hidden_states=True` on every step is
    slow. Time the n=5 sanity runs and extrapolate before committing to the full grid. Any speed-up
    (e.g. requesting hidden states only during latent steps) must not change outputs; prove it with
-   a test comparing outputs before/after. Measured 2026-10-16, Apple M4 (MPS, fp16), Qwen2.5-3B, mean per problem
+   a test comparing outputs before/after.
+   **Measured 2026-10-23 (3B, MPS):** `output_hidden_states=True` costs <1% per decode step
+   (75.5–80.4 vs 75.7–75.8 ms/step), so that speed-up is **not worth the risk**; code unchanged. Measured 2026-10-16, Apple M4 (MPS, fp16), Qwen2.5-3B, mean per problem
    over 3 problems: single_cot 42 s, text_mas 149 s, latent_mas m10 24 s, hetero_mas 54 s.
    Kaggle T4 timings still needed before planning T5.
 9. **[fixed 2026-10-16] hetero device placement.** `run.py --device_b cuda:1` puts `model_b` on a
@@ -126,7 +128,7 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 | T3 | ~~Sanity runs~~ done 2026-10-23 on Kaggle (dev slice). Baselines PASS; latent_mas **m=10 FAILS** the coherence criterion (0/5, issue 4); m=1 coherent 5/5. Summary: `spec/kaggle/t3_summary.csv` | Judger outputs contain `\boxed{}`; latent_mas output is coherent text; `tie_word_embeddings` value recorded; per-problem latency noted |
 | T4 | ~~Resolve issues 5 and 6~~ done 2026-10-16 (5: `--split`; 6: option (c)); human to confirm | `--split` added (if agreed); m=0 semantics decided and logged |
 | T5 | ~~Run plan~~ done 2026-10-23: `spec/kaggle/plan.md`: 55.6 GPU-h, ~28 h wall-clock on 2x T4, ~2.5 sessions, <1 week of quota. Grid still lacks m=1 (needs a decision, issue 4) | Runtime estimate per method x n; table of runs split across the 2 GPUs and Kaggle weekly quota |
-| T6 | Dev runs | m ∈ {0,5,10,20,40}; realign `raw` vs `norm_only` vs `full`; single_cot; text_mas |
+| T6 | Dev runs: `notebooks/kaggle_T6_dev.ipynb` (~7.6 h on 2x T4, one session) | m ∈ {0,1,2,3,5,10,20,40}; realign `raw` vs `norm_only` vs `full`; m=0 drop; single_cot; text_mas; m chosen by `scripts/select_m.py` |
 | T7 | Final runs | Chosen settings on the full GSM8K test set (1,319) for 3B; repeat main rows on 1.5B |
 | T8 | Stretch: adapter | `fit_adapter` held-out cosine reported. Near 0 = broken map (debug); decent cosine with no accuracy gain = legitimate negative result |
 | T9 | Analysis | `analyze.py` table with CIs, McNemar p, % tokens saved, forward passes, latency; ablation plot |
@@ -187,3 +189,17 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   Python 3.13): use it to reproduce on Kaggle, not for local installs.
 - 2026-10-23: T5 plan from Kaggle timings (`spec/kaggle/plan.md`): 55.6 GPU-h, two lanes of ~28 h.
   T7 latent row uses the placeholder m=10 until T6 picks m.
+- 2026-10-23: **Pre-registered m-selection rule (written before any T6 result):** among the dev
+  `latent_mas_m<k>` runs (realign `full`, cache `keep`), choose the m with the highest dev accuracy on
+  the problems all of them finished; ties go to the smaller m. Text MAS, H1's thresholds and ablation
+  rows play no part. Implemented in `scripts/select_m.py`, which refuses to choose on < 300 problems.
+  The team may amend this rule only before T6 results are seen.
+  Known edge case: if every latent run scores the same (e.g. all 0%), the tie-break picks the
+  smallest m, which can be m=0 (no latent thinking). Decide now whether that should instead be
+  reported as "no working m" (H1 then fails by construction).
+- 2026-10-23: Dev grid gains m ∈ {1,2,3} (`scripts/plan.py`), because Qwen2.5-3B is coherent only at
+  very small m (issue 4). Additive, dev slice only; H1 thresholds and the default m=10 untouched.
+  Open: whether the m chosen on 3B also applies to the 1.5B final rows (T7).
+- 2026-10-23: `analyze.py` prints a `\boxed{}` rate per run (coherence signal, issue 4).
+- 2026-10-23: `notebooks/kaggle_T6_dev.ipynb` (+ builder): T6 grid on both GPUs, decision rows first,
+  11 h budget guard, resume from a previous session's output, then analyze + select_m + T7 plan.

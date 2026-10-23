@@ -85,6 +85,15 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
      Also not changed: the reference's latent judger prompt adds "The latent information might contain
      irrelevant contents. Ignore it if it is not helpful"; ours doesn't. Changing a prompt is a design call.
    - Original fp16 advice still stands: never switch to quantization.
+   - **Confirmed on Kaggle T4 (2026-10-23, CUDA fp16, dev slice train[5000:5005]):** 3B m=1 5/5 correct
+     and coherent (180 output tokens vs text MAS 744, 76% fewer; 9.9 s vs 40.3 s per problem);
+     m=5 0/5 and m=10 0/5, both incoherent; m=0 `drop` 5/5. 1.5B m=10 0/5. Same pattern as on the Mac,
+     so it is not a backend (MPS) artefact. Caveat: at n=5, m=1 cannot be told apart from m=0 `drop`
+     or single_cot (all 5/5); the dev sweep must show whether 1 latent step adds anything.
+   - **Decision needed before T6:** the pre-registered grid m ∈ {0,5,10,20,40} skips the only working
+     region. Proposal for the human: add m ∈ {1,2,3} to the dev grid (adding rows is not changing H1's
+     thresholds). The notebook's CJK "junk" heuristic missed m=10's whitespace junk; rely on the
+     `\boxed{}` rate and reading outputs.
 5. **[fixed 2026-10-16] Dev/test leakage.** `run.py --split {test,train}`. Train runs must use
    `--offset >= 2000` (enforced; `adapter.ADAPTER_TRAIN_TEXTS`), and they write to
    `results/<model>/train/` so they can never be mixed into the test table. `fit_adapter` refuses
@@ -97,7 +106,8 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
    so `drop` is probably the cleaner "no thinking" row. Test: `test_latent_mas_m0_keep_vs_drop`.
 7. **[measured 2026-10-16] Text-MAS truncation.** `analyze.py` now prints, for text_mas runs, the share
    of non-judger agents that hit `agent_max_tokens` (read from the run's `.config.json`). Smoke run
-   (1.5B, 1 problem): 3/3 agents at the 256 cap. If this holds at n=300, raise the cap and log why.
+   (1.5B, 1 problem): 3/3 agents at the 256 cap. Kaggle sanity (dev, n=5): 3B 27%, 1.5B 7%.
+   If ~27% holds at n=300, decide whether to raise the cap (and log why).
 8. **[perf] Runtime unknown.** Batch-1 decoding with `output_hidden_states=True` on every step is
    slow. Time the n=5 sanity runs and extrapolate before committing to the full grid. Any speed-up
    (e.g. requesting hidden states only during latent steps) must not change outputs; prove it with
@@ -111,11 +121,11 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 
 | # | Task | Done when |
 |---|---|---|
-| T1 | Environment + mechanics (run `notebooks/kaggle_T1_T3_T5.ipynb`) | `pytest -v` fully green (mechanics included) on Kaggle; torch/transformers versions written in this file; `requirements.lock` committed |
+| T1 | ~~Environment + mechanics~~ done 2026-10-23 on Kaggle (see Change log; `requirements.lock`) | `pytest -v` fully green (mechanics included) on Kaggle; torch/transformers versions written in this file; `requirements.lock` committed |
 | T2 | ~~Fix issues 2 and 3~~ done 2026-10-16 | Tests added; Change log updated |
-| T3 | Sanity runs, `--n 5`, all three main methods on 3B (local MPS run: m=10 incoherent, issue 4; Kaggle run in the notebook, on the dev slice) | Judger outputs contain `\boxed{}`; latent_mas output is coherent text; `tie_word_embeddings` value recorded; per-problem latency noted |
+| T3 | ~~Sanity runs~~ done 2026-10-23 on Kaggle (dev slice). Baselines PASS; latent_mas **m=10 FAILS** the coherence criterion (0/5, issue 4); m=1 coherent 5/5. Summary: `spec/kaggle/t3_summary.csv` | Judger outputs contain `\boxed{}`; latent_mas output is coherent text; `tie_word_embeddings` value recorded; per-problem latency noted |
 | T4 | ~~Resolve issues 5 and 6~~ done 2026-10-16 (5: `--split`; 6: option (c)); human to confirm | `--split` added (if agreed); m=0 semantics decided and logged |
-| T5 | Run plan (`scripts/plan.py`; the notebook runs it on Kaggle timings) | Runtime estimate per method x n; table of runs split across the 2 GPUs and Kaggle weekly quota |
+| T5 | ~~Run plan~~ done 2026-10-23: `spec/kaggle/plan.md`: 55.6 GPU-h, ~28 h wall-clock on 2x T4, ~2.5 sessions, <1 week of quota. Grid still lacks m=1 (needs a decision, issue 4) | Runtime estimate per method x n; table of runs split across the 2 GPUs and Kaggle weekly quota |
 | T6 | Dev runs | m ∈ {0,5,10,20,40}; realign `raw` vs `norm_only` vs `full`; single_cot; text_mas |
 | T7 | Final runs | Chosen settings on the full GSM8K test set (1,319) for 3B; repeat main rows on 1.5B |
 | T8 | Stretch: adapter | `fit_adapter` held-out cosine reported. Near 0 = broken map (debug); decent cosine with no accuracy gain = legitimate negative result |
@@ -169,3 +179,11 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   commands. `notebooks/kaggle_T1_T3_T5.ipynb`: one Kaggle session for T1 (tests, versions,
   requirements.lock), T3 (sanity runs on the dev slice `train` offset 5000, not test) and T5.
   Dry-run locally from a `git bundle`.
+- 2026-10-23: T1 on Kaggle (Tesla T4, Tesla T4): pytest green; python 3.13.15, torch 2.11.0+cu128 (CUDA 12.8), transformers 5.16.1; requirements.lock committed. Commit aa2b35a.
+- 2026-10-23: T3 sanity (train offset 5000, n=5, Qwen2.5-3B-Instruct, T4 fp16): latent_mas_m0_drop 13 s, latent_mas_m10 10 s, latent_mas_m1 10 s, latent_mas_m5 11 s, single_cot 13 s, text_mas 40 s per problem; tie_word_embeddings = True.
+- 2026-10-23: T3 outcome: accuracy (n=5, dev) single_cot 5/5, text_mas 5/5, latent m0_drop 5/5,
+  m1 5/5, m5 0/5, m10 0/5; 1.5B single_cot 5/5, text_mas 5/5, latent m10 0/5. Peak memory 3B ≈ 6.1–6.4 GB,
+  1.5B ≈ 3.0–3.3 GB per T4. `requirements.lock` is a freeze of the whole Kaggle image (920 packages,
+  Python 3.13): use it to reproduce on Kaggle, not for local installs.
+- 2026-10-23: T5 plan from Kaggle timings (`spec/kaggle/plan.md`): 55.6 GPU-h, two lanes of ~28 h.
+  T7 latent row uses the placeholder m=10 until T6 picks m.

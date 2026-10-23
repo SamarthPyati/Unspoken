@@ -111,11 +111,11 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
 
 | # | Task | Done when |
 |---|---|---|
-| T1 | Environment + mechanics | `pytest -v` fully green (mechanics included) on Kaggle; torch/transformers versions written in this file; `requirements.lock` committed |
-| T2 | Fix issues 2 and 3 | Tests added; Change log updated |
-| T3 | Sanity runs, `--n 5`, all three main methods on 3B | Judger outputs contain `\boxed{}`; latent_mas output is coherent text; `tie_word_embeddings` value recorded; per-problem latency noted |
+| T1 | Environment + mechanics (run `notebooks/kaggle_T1_T3_T5.ipynb`) | `pytest -v` fully green (mechanics included) on Kaggle; torch/transformers versions written in this file; `requirements.lock` committed |
+| T2 | ~~Fix issues 2 and 3~~ done 2026-10-16 | Tests added; Change log updated |
+| T3 | Sanity runs, `--n 5`, all three main methods on 3B (local MPS run: m=10 incoherent, issue 4; Kaggle run in the notebook, on the dev slice) | Judger outputs contain `\boxed{}`; latent_mas output is coherent text; `tie_word_embeddings` value recorded; per-problem latency noted |
 | T4 | ~~Resolve issues 5 and 6~~ done 2026-10-16 (5: `--split`; 6: option (c)); human to confirm | `--split` added (if agreed); m=0 semantics decided and logged |
-| T5 | Run plan | Runtime estimate per method x n; table of runs split across the 2 GPUs and Kaggle weekly quota |
+| T5 | Run plan (`scripts/plan.py`; the notebook runs it on Kaggle timings) | Runtime estimate per method x n; table of runs split across the 2 GPUs and Kaggle weekly quota |
 | T6 | Dev runs | m ∈ {0,5,10,20,40}; realign `raw` vs `norm_only` vs `full`; single_cot; text_mas |
 | T7 | Final runs | Chosen settings on the full GSM8K test set (1,319) for 3B; repeat main rows on 1.5B |
 | T8 | Stretch: adapter | `fit_adapter` held-out cosine reported. Near 0 = broken map (debug); decent cosine with no accuracy gain = legitimate negative result |
@@ -164,3 +164,8 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   `latent_mas`, scores with `data.extract_prediction`/`is_correct`, shows all four metrics side
   by side, caches results in `cache/demo_results.json`. Demo only; does not write to `results/`.
   New dependency `gradio` (demo only).
+- 2026-10-23: `scripts/plan.py` (T5): reads timed runs, extrapolates unmeasured latent m from
+  seconds per forward pass (marked `~`), packs the T6/T7 grid onto 2 GPUs and prints per-GPU
+  commands. `notebooks/kaggle_T1_T3_T5.ipynb`: one Kaggle session for T1 (tests, versions,
+  requirements.lock), T3 (sanity runs on the dev slice `train` offset 5000, not test) and T5.
+  Dry-run locally from a `git bundle`.

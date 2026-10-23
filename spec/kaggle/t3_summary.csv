@@ -1,0 +1,10 @@
+model,run,n,acc,boxed,junk,out_tok,fwd,sec,peak_mb,agents_at_cap
+Qwen2.5-1.5B-Instruct,latent_mas_m10_seed0,5,0.0,0.0,4/5,512.0,546.0,21.19802,3042.6,
+Qwen2.5-1.5B-Instruct,single_cot_seed0,5,1.0,1.0,0/5,250.2,251.2,9.971039999999999,3007.7,
+Qwen2.5-1.5B-Instruct,text_mas_seed0,5,1.0,1.0,0/5,579.4,583.4,24.91344,3315.1,7%
+Qwen2.5-3B-Instruct,latent_mas_m0_drop_seed0,5,1.0,1.0,0/5,246.4,247.4,12.55692,6088.9,
+Qwen2.5-3B-Instruct,latent_mas_m10_seed0,5,0.0,0.0,0/5,158.6,192.6,9.9586,6115.1,
+Qwen2.5-3B-Instruct,latent_mas_m1_seed0,5,1.0,1.0,0/5,180.4,187.4,9.89644,6113.5,
+Qwen2.5-3B-Instruct,latent_mas_m5_seed0,5,0.0,0.2,1/5,178.8,197.8,10.79166,6114.2,
+Qwen2.5-3B-Instruct,single_cot_seed0,5,1.0,1.0,0/5,249.4,250.4,12.9041,6066.2,
+Qwen2.5-3B-Instruct,text_mas_seed0,5,1.0,1.0,0/5,744.2,748.2,40.33872,6362.1,27%

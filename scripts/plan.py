@@ -21,6 +21,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 N_AGENTS_THINKING = 3   # planner, critic, refiner; the judger decodes text
+DEV_LATENT_STEPS = (0, 1, 2, 3, 5, 10, 20, 40)
 
 
 def summarize_runs(run_dir: str) -> Dict[str, Dict[str, float]]:
@@ -35,6 +36,19 @@ def summarize_runs(run_dir: str) -> Dict[str, Dict[str, float]]:
         out[tag] = {"n": len(rows),
                     "sec": sum(r["latency_s"] for r in rows) / len(rows),
                     "fwd": sum(r["forward_passes"] for r in rows) / len(rows)}
+    return out
+
+
+def summarize_csv(path: str, model_short: str) -> Dict[str, Dict[str, float]]:
+    """Same as summarize_runs, from a committed T3 summary (spec/kaggle/t3_summary.csv),
+    so a fresh Kaggle session can schedule before it has run anything."""
+    import csv
+    out = {}
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            if row["model"] == model_short:
+                tag = re.sub(r"_seed\d+$", "", row["run"])
+                out[tag] = {"n": int(row["n"]), "sec": float(row["sec"]), "fwd": float(row["fwd"])}
     return out
 
 
@@ -66,9 +80,12 @@ def estimate(stats: Dict[str, Dict[str, float]], tag: str) -> Tuple[Optional[flo
 
 
 def build_grid(final_m: int, n_dev: int, n_test: int, dev_offset: int) -> List[Dict]:
-    """The HANDOFF T6 (dev) and T7 (final) runs."""
+    """The HANDOFF T6 (dev) and T7 (final) runs.
+
+    Dev m grid: the pre-registered {0, 5, 10, 20, 40} plus {1, 2, 3}, added 2026-10-23 because
+    Qwen2.5-3B is coherent only at very small m (HANDOFF issue 4). Dev slice only."""
     dev = (["single_cot", "text_mas"] +
-           [f"latent_mas_m{m}" for m in (0, 5, 10, 20, 40)] +
+           [f"latent_mas_m{m}" for m in DEV_LATENT_STEPS] +
            ["latent_mas_m0_drop", "latent_mas_m10_raw", "latent_mas_m10_norm_only"])
     final = ["single_cot", "text_mas", f"latent_mas_m{final_m}"]
     jobs = [{"phase": "T6 dev", "size": "3B", "tag": t, "split": "train", "offset": dev_offset,
@@ -111,8 +128,12 @@ def command(job: Dict, models: Dict[str, str]) -> str:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--dir", required=True, help="timed 3B runs (e.g. results/<3B>/train)")
+    p.add_argument("--dir", default=None, help="timed 3B runs (e.g. results/<3B>/train)")
     p.add_argument("--dir_small", default=None, help="timed 1.5B runs")
+    p.add_argument("--summary_csv", default=None,
+                   help="instead of --dir/--dir_small: timings from spec/kaggle/t3_summary.csv")
+    p.add_argument("--phase", default="all", choices=["all", "dev", "final"],
+                   help="schedule only the T6 dev runs, only the T7 final runs, or both")
     p.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
     p.add_argument("--model_small", default="Qwen/Qwen2.5-1.5B-Instruct")
     p.add_argument("--final_m", type=int, default=10,
@@ -128,9 +149,17 @@ def main():
     p.add_argument("--emit_commands", action="store_true")
     args = p.parse_args()
 
-    stats = {"3B": summarize_runs(args.dir),
-             "1.5B": summarize_runs(args.dir_small) if args.dir_small else {}}
+    if args.summary_csv:
+        stats = {"3B": summarize_csv(args.summary_csv, args.model.split("/")[-1]),
+                 "1.5B": summarize_csv(args.summary_csv, args.model_small.split("/")[-1])}
+    elif args.dir:
+        stats = {"3B": summarize_runs(args.dir),
+                 "1.5B": summarize_runs(args.dir_small) if args.dir_small else {}}
+    else:
+        p.error("give --dir (and optionally --dir_small) or --summary_csv")
     jobs = build_grid(args.final_m, args.n_dev, args.n_test, args.dev_offset)
+    if args.phase != "all":
+        jobs = [j for j in jobs if j["phase"].startswith("T6" if args.phase == "dev" else "T7")]
     for job in jobs:
         sec, est = estimate(stats[job["size"]], job["tag"])
         job["sec"], job["est"] = sec, est

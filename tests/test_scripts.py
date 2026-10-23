@@ -93,3 +93,52 @@ def test_plan_cli(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "Total GPU-hours" in r.stdout and "# --- GPU 1" in r.stdout
     assert "Not estimated (time them first): 1.5B single_cot" in r.stdout   # no --dir_small
+
+
+def _scored_run(dirpath, tag, correct):
+    with open(dirpath / f"{tag}_seed0.jsonl", "w") as f:
+        for i, c in enumerate(correct):
+            f.write(json.dumps({"id": f"p{i}", "correct": c}) + "\n")
+
+
+def test_select_m_rule(tmp_path):
+    """Pre-registered rule: highest dev accuracy among plain latent runs; ties -> smaller m;
+    ablation rows and text MAS are never candidates."""
+    from scripts import select_m
+    _scored_run(tmp_path, "latent_mas_m1", [1, 1, 0, 1])
+    _scored_run(tmp_path, "latent_mas_m3", [1, 1, 1, 0])        # ties m=1 -> m=1 wins
+    _scored_run(tmp_path, "latent_mas_m10", [0, 0, 0, 0])
+    _scored_run(tmp_path, "latent_mas_m10_raw", [1, 1, 1, 1])   # ablation: ignored
+    _scored_run(tmp_path, "latent_mas_m0_drop", [1, 1, 1, 1])   # ablation: ignored
+    _scored_run(tmp_path, "text_mas", [1, 1, 1, 1])             # not latent: ignored
+    chosen, table = select_m.select_m(select_m.load_latent_runs(str(tmp_path)))
+    assert chosen == 1
+    assert [m for m, _, _ in table] == [1, 3, 10]
+
+
+def test_select_m_refuses_small_n(tmp_path):
+    _scored_run(tmp_path, "latent_mas_m1", [1, 1])
+    r = subprocess.run([sys.executable, "-m", "scripts.select_m", "--dir", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "finish the dev runs" in r.stderr
+
+
+def test_plan_dev_grid_includes_small_m():
+    from scripts import plan
+    tags = [j["tag"] for j in plan.build_grid(10, 300, 1319, 5000) if j["phase"] == "T6 dev"]
+    for m in (0, 1, 2, 3, 5, 10, 20, 40):
+        assert f"latent_mas_m{m}" in tags
+
+
+def test_plan_from_summary_csv_dev_phase(tmp_path):
+    from scripts import plan
+    csv = tmp_path / "t3.csv"
+    csv.write_text("model,run,n,acc,boxed,junk,out_tok,fwd,sec,peak_mb,agents_at_cap\n"
+                   "Qwen2.5-3B-Instruct,latent_mas_m1_seed0,5,1.0,1.0,0/5,180,187.4,9.9,6113,\n"
+                   "Qwen2.5-1.5B-Instruct,single_cot_seed0,5,1.0,1.0,0/5,250,251,10.0,3007,\n")
+    stats = plan.summarize_csv(str(csv), "Qwen2.5-3B-Instruct")
+    assert stats == {"latent_mas_m1": {"n": 5, "sec": 9.9, "fwd": 187.4}}
+    r = subprocess.run([sys.executable, "-m", "scripts.plan", "--summary_csv", str(csv),
+                        "--phase", "dev"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "T6 dev" in r.stdout and "T7 final" not in r.stdout

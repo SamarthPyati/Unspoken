@@ -21,13 +21,14 @@ own extension.
 
 | | |
 |---|---|
-| Tests | `pytest` green: 26 tests, including the KV-cache mechanics tests |
+| Tests | `pytest` green: 30 tests, including the KV-cache mechanics tests |
 | End-to-end | Every method and script runs end to end on Qwen2.5-3B (Apple M4, MPS) |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
 | **Open finding** | `latent_mas` is coherent at small `m` (1–5) on Qwen2.5-3B but **degrades at the default `m=10`** and breaks at any `m ≥ 1` on 1.5B. It stays coherent on Qwen3-4B (the reference's model family), so the code is correct; the model and `m` choice is a decision for the team. See HANDOFF issue 4. |
 | Demo | `python -m scripts.demo`: Gradio side-by-side of text vs latent MAS (T10) |
 | Kaggle | `notebooks/kaggle_T1_T3_T5.ipynb` is ready: tests, sanity runs and run plan in one session |
-| Still to do | Run that notebook (T1, T3, T5); dev sweep (T6); final runs (T7) |
+| Kaggle results | T1/T3/T5 done on 2x T4 (2026-10-23): 3B latent m=1 coherent 5/5, m=5/10 broken |
+| Next | Run `notebooks/kaggle_T6_dev.ipynb` (T6 dev sweep, ~7.6 h) → final runs (T7) |
 
 ---
 
@@ -210,6 +211,11 @@ in one GPU session:
 
 Sanity runs use the dev slice (`--split train --offset 5000`), never the test set.
 
+**T6 dev sweep:** [`notebooks/kaggle_T6_dev.ipynb`](notebooks/kaggle_T6_dev.ipynb) runs the dev grid
+(m ∈ {0,1,2,3,5,10,20,40}, the realign and m=0 ablations, both baselines; ~7.6 h on 2x T4). It then
+picks `m` with the pre-registered rule in `scripts/select_m.py` and plans T7 with it. Use *Save & Run
+All (Commit)*. If the session ends early, add its output as an input to a new session and it resumes.
+
 To plan runs from any timed results yourself:
 
 ```bash
@@ -281,8 +287,11 @@ scripts/
   analyze.py     results table, significance, truncation rate, ablation plot
   demo.py        Gradio app: text vs latent MAS side by side, with metrics
   plan.py        run plan: GPU-hours, 2-GPU schedule and commands from timed runs
+  select_m.py    pre-registered rule that picks m from the dev sweep
 notebooks/
   kaggle_T1_T3_T5.ipynb   one Kaggle session: tests, sanity runs, run plan
+  kaggle_T6_dev.ipynb     dev sweep, m selection, T7 plan
+  build_*.py              generators for the notebooks (edit these, not the .ipynb)
 tests/           pytest: data, metrics, mechanics (tiny random model), script guards
 spec/            CLAUDE.md, HANDOFF.md, docs/RESEARCH_CONTEXT.md
 ```

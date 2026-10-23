@@ -21,12 +21,13 @@ own extension.
 
 | | |
 |---|---|
-| Tests | `pytest` green: 23 tests, including the KV-cache mechanics tests |
+| Tests | `pytest` green: 26 tests, including the KV-cache mechanics tests |
 | End-to-end | Every method and script runs end to end on Qwen2.5-3B (Apple M4, MPS) |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
 | **Open finding** | `latent_mas` is coherent at small `m` (1–5) on Qwen2.5-3B but **degrades at the default `m=10`** and breaks at any `m ≥ 1` on 1.5B. It stays coherent on Qwen3-4B (the reference's model family), so the code is correct; the model and `m` choice is a decision for the team. See HANDOFF issue 4. |
 | Demo | `python -m scripts.demo`: Gradio side-by-side of text vs latent MAS (T10) |
-| Still to do | Kaggle T4 run of the tests + `requirements.lock` (T1); dev sweep (T6); final runs (T7) |
+| Kaggle | `notebooks/kaggle_T1_T3_T5.ipynb` is ready: tests, sanity runs and run plan in one session |
+| Still to do | Run that notebook (T1, T3, T5); dev sweep (T6); final runs (T7) |
 
 ---
 
@@ -188,6 +189,37 @@ you get each judger's answer, the text agents' messages, and the size of the lat
   Qwen2.5). Showing only the good setting would be cherry-picking.
 - One question illustrates the mechanism. It is not evidence for H1; that comes from `scripts.analyze`.
 
+### Kaggle (T4 x2)
+
+[`notebooks/kaggle_T1_T3_T5.ipynb`](notebooks/kaggle_T1_T3_T5.ipynb) does HANDOFF tasks T1, T3 and T5
+in one GPU session:
+- **T1:** install, run the full test suite on the T4, write `requirements.lock`.
+- **T3:** 5-problem sanity runs on 3B, plus timing runs on 1.5B, on both GPUs in parallel.
+- **T5:** build a run plan for the dev and final grid.
+
+1. Get the code to Kaggle. Either push to GitHub and set `REPO_URL` in the first cell, or make a
+   bundle and upload it as a private Kaggle dataset (it keeps the git history, so results record their commit):
+   ```bash
+   git bundle create unspoken.bundle --all
+   ```
+2. New notebook → *File → Import notebook* → this `.ipynb`. *Settings:* **GPU T4 x2**, **Internet on**.
+   *Add Input:* your bundle dataset (if you're not using GitHub).
+3. *Run All* (about 45–75 min). Download `unspoken_kaggle_T1_T3_T5.zip` from the Output panel.
+4. Locally: unzip `results/` into `results/`, commit `requirements.lock`, and paste the printed
+   change-log lines into `spec/HANDOFF.md`.
+
+Sanity runs use the dev slice (`--split train --offset 5000`), never the test set.
+
+To plan runs from any timed results yourself:
+
+```bash
+python -m scripts.plan --dir results/Qwen2.5-3B-Instruct/train \
+    --dir_small results/Qwen2.5-1.5B-Instruct/train --emit_commands
+```
+
+It prints GPU-hours per run, how the runs split across 2 GPUs, the number of Kaggle sessions and
+weeks of quota, and the exact `CUDA_VISIBLE_DEVICES=…` commands for each GPU.
+
 ---
 
 ## Guidance: rules that keep the results valid
@@ -248,6 +280,9 @@ scripts/
   fit_adapter.py fit the cross-model map on GSM8K train
   analyze.py     results table, significance, truncation rate, ablation plot
   demo.py        Gradio app: text vs latent MAS side by side, with metrics
+  plan.py        run plan: GPU-hours, 2-GPU schedule and commands from timed runs
+notebooks/
+  kaggle_T1_T3_T5.ipynb   one Kaggle session: tests, sanity runs, run plan
 tests/           pytest: data, metrics, mechanics (tiny random model), script guards
 spec/            CLAUDE.md, HANDOFF.md, docs/RESEARCH_CONTEXT.md
 ```

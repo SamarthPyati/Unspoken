@@ -11,24 +11,86 @@ The method re-implements LatentMAS (Zou et al., arXiv 2511.20639,
 the team understands and controls every line. The cross-model adapter (`src/adapter.py`) is our
 own extension.
 
+## Why save tokens?
+
+Generating text is the expensive part of running an LLM. Every output token is one full,
+**sequential** forward pass through the model. Prompt tokens are cheaper because they are processed
+in parallel, but they still cost compute and memory. So output tokens drive:
+
+- **Latency**: the answer cannot arrive faster than the tokens can be generated one by one.
+- **Compute, energy and money**: hosted APIs bill per token; self-hosted GPUs pay in time.
+- **Context**: everything written has to be held in the KV cache and read again later.
+
+**Multi-agent systems make this worse.** A planner → critic → refiner → judger pipeline doesn't
+just write one answer. Every agent writes a message in full, and the next agent has to read the
+whole transcript again. Most of those tokens are agents talking to each other, not the answer the
+user sees.
+
+**The idea we test:** let the agents pass their *working memory* (the KV cache) instead of
+writing to each other. The intermediate agents "think" in hidden-state space, and only the final
+judger writes text. If accuracy holds, all of the inter-agent writing and re-reading disappears.
+H1 makes that concrete: at least 50% fewer output tokens, at most 3 points of accuracy lost.
+
+## Does it save tokens in the thinking process?
+
+**Yes for the agents' intermediate thinking; mostly no for the final reasoning.** Measured on
+Kaggle T4, Qwen2.5-3B, 5 dev problems. These are sanity numbers, not results:
+
+| Per problem | Text MAS | Latent MAS (m=1) | Judger alone (m=0 drop) |
+|---|---|---|---|
+| Planner + critic + refiner write | **550 tokens** (102 + 253 + 195) | **0 tokens** (3 latent steps instead) | – |
+| Judger writes | 194 tokens | 180 tokens | 246 tokens |
+| **Output tokens, total** | **744** | **180 (−76%)** | 246 |
+| Prompt tokens read | 1,410 | 402 (−71%) | 100 |
+| Forward passes | 748 | 187 (−75%) | 247 |
+| Latency | 40.3 s | 9.9 s (−75%) | 12.6 s |
+| Correct | 5/5 | 5/5 | 5/5 |
+
+What the table shows:
+
+1. **The intermediate thinking becomes free in tokens.** In text MAS, 74% of all output tokens
+   (550 of 744) are agents writing to each other. In latent MAS that thinking is done in hidden
+   space: each latent step is one forward pass that writes no token. Re-reading goes too: the
+   prompt tokens drop from 1,410 to 402 because no transcript is pasted forward.
+2. **The judger still reasons in text.** Its chain of thought is about the same length either way
+   (194 vs 180 tokens). The method removes inter-agent *messages*, not the final written reasoning.
+   Compressing a single model's own chain of thought into latent steps is a different line of work
+   (e.g. Coconut, "reasoning in continuous latent space") and is out of scope here.
+3. **The latent context may shorten that reasoning a little.** With the earlier agents' latent
+   work in its cache, the judger wrote 180 tokens instead of 246 on its own. With n=5 this is only
+   a hint; the dev sweep (T6) will tell.
+
+**Thinking in latent space is not free in compute.** A latent step costs the same forward pass as
+a generated token; it just doesn't produce one. That's why this project always reports **forward
+passes and latency next to tokens** (invariant 5). At m=1 the savings are real on both counts: 3
+latent passes replace about 550 generated tokens. At larger m the tokens stay low, but on Qwen2.5-3B
+the answers fall apart (m=5 and m=10 scored 0/5). So "fewer tokens" only counts when accuracy holds,
+and H1 requires both.
+
+**Trade-offs:**
+- **Interpretability:** you can read a critic's text, but you can't read a latent step.
+- **Memory:** the latent positions sit in the KV cache, and peak GPU memory is about the same
+  (≈6.1 vs 6.4 GB on 3B).
+- **Same model only:** a KV cache can't move between different models; that is what our adapter
+  extension explores.
+
 **Before changing anything, read** [`spec/CLAUDE.md`](spec/CLAUDE.md) (rules and invariants),
 [`spec/HANDOFF.md`](spec/HANDOFF.md) (status, open issues, task queue, change log) and
 [`spec/docs/RESEARCH_CONTEXT.md`](spec/docs/RESEARCH_CONTEXT.md) (why the experiment is designed this way).
 
 ---
 
-## Status (16 Oct 2026)
+## Status (24 Oct 2026)
 
 | | |
 |---|---|
 | Tests | `pytest` green: 30 tests, including the KV-cache mechanics tests |
-| End-to-end | Every method and script runs end to end on Qwen2.5-3B (Apple M4, MPS) |
+| Kaggle (T1, T3, T5) | Done on 2x T4: tests green on CUDA, `requirements.lock` committed, sanity runs and run plan done |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
-| **Open finding** | `latent_mas` is coherent at small `m` (1–5) on Qwen2.5-3B but **degrades at the default `m=10`** and breaks at any `m ≥ 1` on 1.5B. It stays coherent on Qwen3-4B (the reference's model family), so the code is correct; the model and `m` choice is a decision for the team. See HANDOFF issue 4. |
-| Demo | `python -m scripts.demo`: Gradio side-by-side of text vs latent MAS (T10) |
-| Kaggle | `notebooks/kaggle_T1_T3_T5.ipynb` is ready: tests, sanity runs and run plan in one session |
-| Kaggle results | T1/T3/T5 done on 2x T4 (2026-10-23): 3B latent m=1 coherent 5/5, m=5/10 broken |
-| Next | Run `notebooks/kaggle_T6_dev.ipynb` (T6 dev sweep, ~7.6 h) → final runs (T7) |
+| **Open finding** | On Qwen2.5-3B, `latent_mas` is coherent at **m=1** (5/5) but broken at m=5 and at the default **m=10** (0/5); 1.5B breaks at m=10. Qwen3-4B (the reference's model family) stays coherent at m=10, so the code is correct. The dev sweep adds m ∈ {1,2,3}. See HANDOFF issue 4. |
+| Dev sweep (T6) | Attempt 1 failed (out of memory from leftover runs; results void). The notebook now guards against that. **Rerun pending:** `notebooks/kaggle_T6_dev.ipynb`, ~7.6 h. |
+| Demo | `python -m scripts.demo`: Gradio side by side of text vs latent MAS (T10) |
+| Next | T6 rerun → m chosen by the pre-registered rule → final runs (T7) → analysis (T9) |
 
 ---
 

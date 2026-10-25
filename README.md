@@ -84,12 +84,12 @@ and H1 requires both.
 
 | | |
 |---|---|
-| Tests | `pytest` green: 30 tests, including the KV-cache mechanics tests |
+| Tests | `pytest` green: 33 tests, including the KV-cache mechanics tests |
 | Kaggle (T1, T3, T5) | Done on 2x T4: tests green on CUDA, `requirements.lock` committed, sanity runs and run plan done |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
 | **Open finding** | On Qwen2.5-3B, `latent_mas` is coherent at **m=1** (5/5) but broken at m=5 and at the default **m=10** (0/5); 1.5B breaks at m=10. Qwen3-4B (the reference's model family) stays coherent at m=10, so the code is correct. The dev sweep adds m ∈ {1,2,3}. See HANDOFF issue 4. |
 | Dev sweep (T6) | Attempt 1 failed (out of memory from leftover runs; results void). The notebook now guards against that. **Rerun pending:** `notebooks/kaggle_T6_dev.ipynb`, ~7.6 h. |
-| Demo | `python -m scripts.demo`: Gradio side by side of text vs latent MAS (T10) |
+| Demo | `python -m scripts.demo`: chat with text agents vs Unspoken side by side, live token counts and a savings scoreboard |
 | Next | T6 rerun → m chosen by the pre-registered rule → `notebooks/kaggle_T7_final.ipynb` (ready) → analysis (T9) |
 
 ---
@@ -230,27 +230,34 @@ python -m scripts.run --method hetero_mas --n 5 --model Qwen/Qwen2.5-1.5B-Instru
 Fit on GSM8K train only. Report the held-out cosine it prints. Near 0 means the map is broken;
 a decent cosine with no accuracy gain is a legitimate negative result.
 
-### Live demo (side by side)
+### Live demo (chat)
 
 ```bash
-python -m scripts.demo --precompute 3 --latent_steps 1    # optional: cache 3 questions first
 python -m scripts.demo                                     # opens http://127.0.0.1:7860
+python -m scripts.demo --precompute 5                      # optional: cache 5 questions first
 python -m scripts.demo --share                             # public gradio.live link (e.g. from Kaggle)
 ```
 
-Pick a GSM8K question (or type one), set `m` and the realign mode, and press **Compare**. Latent MAS
-runs first (seconds), then text MAS (minutes on a laptop). The table shows the answer, output tokens,
-forward passes, latent steps, prompt tokens and latency for both, with the relative change. Below it
-you get each judger's answer, the text agents' messages, and the size of the latent message
-(cache positions).
+A chat with two answers to every question, side by side:
 
-- Both columns run through the experiment's own `pipelines.text_mas` / `latent_mas`, so the demo
-  shows exactly what is measured.
-- Results are cached in `cache/demo_results.json`. For a live session, precompute the questions you
-  will show; text MAS is cached once and reused for every `m`.
-- Show `m=1` (coherent on Qwen2.5-3B) **and** `m=10` (the experiment default, which degrades on
-  Qwen2.5). Showing only the good setting would be cherry-picking.
-- One question illustrates the mechanism. It is not evidence for H1; that comes from `scripts.analyze`.
+- **Left, 📝 Text agents:** you watch the planner, critic and refiner write their messages to
+  each other live, one collapsible bubble per agent with its token count, then the final answer.
+- **Right, 🧠 Unspoken:** the same agents think silently (`3 latent steps, 0 tokens`), and only the
+  final answer is written.
+- **Scoreboard:** tokens written, answer time and forward passes for this question, plus totals for
+  the whole session (with accuracy on GSM8K examples, which are scored against the gold answer).
+
+Type any math word problem, or click one of the GSM8K examples. *Settings* (collapsed) holds `m`
+(default 1, the setting that is coherent on Qwen2.5-3B), the realign mode and cache replay.
+
+- Both columns run through the experiment's own `pipelines.text_mas` / `latent_mas` and scorer.
+  Live text comes from an observe-only hook that a test proves leaves outputs unchanged.
+- Each question is answered on its own: earlier turns are not fed back in, so prompts stay
+  identical to the experiment's.
+- The methods run one after the other on the same GPU (latent first), and each shows its own time.
+- Results are cached in `cache/demo_results.json`; precompute what you will show live.
+- For honesty, also show `m=10` (the pre-registered default, which breaks on Qwen2.5-3B).
+  One question illustrates the mechanism; it is not evidence for H1.
 
 ### Kaggle (T4 x2)
 
@@ -356,7 +363,7 @@ scripts/
   run.py         run one method on one slice, resumable JSONL output
   fit_adapter.py fit the cross-model map on GSM8K train
   analyze.py     results table, significance, truncation rate, ablation plot
-  demo.py        Gradio app: text vs latent MAS side by side, with metrics
+  demo.py        Gradio chat: text agents vs latent agents side by side, live, with a savings scoreboard
   plan.py        run plan: GPU-hours, 2-GPU schedule and commands from timed runs
   select_m.py    pre-registered rule that picks m from the dev sweep
 notebooks/

@@ -227,3 +227,11 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   the **test** split (17 Oct). T7's 3B single_cot file has the same name. Results are append-only, so
   the team must say how to archive the old file before T7 is imported (proposal: move it to
   `results/_archive/` with a note, no edits).
+- 2026-10-25: Demo redesigned as a chat (`scripts/demo.py`): two chat columns (text agents with one
+  collapsible bubble per agent message and live token counts; latent agents with one "thought
+  silently" bubble), a scoreboard (tokens, time, forward passes; session totals with accuracy on
+  GSM8K examples), settings collapsed, default m=1. Live streaming uses new optional observers
+  `on_token` (latent.decode) and `on_step` (latent.latent_think), passed via `cfg.callback`; absent in
+  experiments. `test_callbacks_only_observe` proves outputs, token counts and forward passes are
+  identical with and without them. Display-only `\\boxed{}` rendering fix; scoring uses raw output.
+

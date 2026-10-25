@@ -35,6 +35,15 @@ from src.modeling import build_realign, default_device, load_model
 from src.prompts import PIPELINE
 
 AGENTS = PIPELINE[:-1]            # planner, critic, refiner: the agents that talk to each other
+
+
+class Interrupted(Exception):
+    """Raised from the streaming hook when the user presses Stop. It aborts generation at the
+    next token or latent step, so the GPU is freed at once; nothing partial is cached."""
+
+    def __init__(self, live: Optional[Dict] = None):
+        super().__init__("stopped by the user")
+        self.live = live or {}
 LATEX = [{"left": "$$", "right": "$$", "display": True},
          {"left": "\\[", "right": "\\]", "display": True},
          {"left": "\\(", "right": "\\)", "display": False}]
@@ -143,6 +152,7 @@ class Demo:
         self.model, self.tok, self.model_name = model, tok, model_name
         self.cache, self.defaults = cache, defaults
         self._realign = {}
+        self.stops: Dict[str, threading.Event] = {}   # Stop flag per browser session
 
     def realign(self, mode: str):
         if mode not in self._realign:
@@ -237,6 +247,16 @@ def latent_messages(tok, live: Dict, result: Optional[Dict], m: int) -> List[Dic
     return msgs
 
 
+def stopped(msgs: List[Dict], live: Dict) -> List[Dict]:
+    """Freeze a column after Stop: close pending bubbles, add a note. Partial text stays visible."""
+    n = sum(len(v) for k, v in live.items() if not k.startswith("_"))
+    out = [{**m, "metadata": {**m["metadata"], "status": "done"}} if m.get("metadata") else m
+           for m in msgs]
+    out.append({"role": "assistant",
+                "content": f"⏹ **Stopped** after {n} tokens written. Partial answers are not cached or scored."})
+    return out
+
+
 def scoreboard(text_r: Optional[Dict], lat_r: Optional[Dict], totals: Dict) -> str:
     """HTML stat cards: this question, then the whole session."""
     def card(label, value, sub):
@@ -292,12 +312,16 @@ CSS = """
 """
 
 
-def _stream(demo: Demo, method: str, question: str, gold, cfg, realign, use_cache, render):
+def _stream(demo: Demo, method: str, question: str, gold, cfg, realign, use_cache, render,
+            stop: Optional[threading.Event] = None):
     """Run one method in a thread; yield render(live, None) while it generates, then
-    render(None, result). The model runs one request at a time (Gradio queue)."""
+    render(None, result). The model runs one request at a time (Gradio queue).
+    If `stop` is set, generation is aborted at the next token and Interrupted(live) is raised."""
     events, box = queue.Queue(), {}
 
     def cb(role, event, value):
+        if stop is not None and stop.is_set():
+            raise Interrupted()           # unwinds decode/latent_think: the model stops now
         events.put((role, event, value))
 
     def work():
@@ -323,9 +347,15 @@ def _stream(demo: Demo, method: str, question: str, gold, cfg, realign, use_cach
             last = time.time()
             yield None, render(live, None)
     th.join()
+    if isinstance(box.get("err"), Interrupted):
+        raise Interrupted(live)
     if "err" in box:
         raise box["err"]
     yield box["r"], render(None, box["r"])
+
+
+def _session(request) -> str:
+    return getattr(request, "session_hash", None) or "local"
 
 
 def build_ui(demo: Demo, examples: List[Dict], default_m: int, default_realign: str):
@@ -333,10 +363,12 @@ def build_ui(demo: Demo, examples: List[Dict], default_m: int, default_realign: 
 
     gold_by_q = {it["question"]: it["gold"] for it in examples}
 
-    def respond(message, text_hist, lat_hist, totals, m, realign, use_cache):
+    def respond(message, text_hist, lat_hist, totals, m, realign, use_cache, request: gr.Request = None):
         q = (message or "").strip()
         if not q:
             raise gr.Error("Type a math word problem, or pick an example below.")
+        flag = demo.stops[_session(request)] = threading.Event()   # one Stop flag per browser session
+        show, hide = gr.update(visible=True), gr.update(visible=False)
         m = int(m)
         cfg = make_cfg(m, "keep", demo.defaults["max_new_tokens"], demo.defaults["agent_max_tokens"])
         gold = gold_by_q.get(q)
@@ -346,20 +378,35 @@ def build_ui(demo: Demo, examples: List[Dict], default_m: int, default_realign: 
                     "metadata": {"title": "⏳ Text agents", "status": "pending"}}]
         board = scoreboard(None, None, totals)
 
+        skipped = [{"role": "assistant", "content": "Not run: stopped before the text agents started."}]
+
         lat_r = None
-        for res, msgs in _stream(demo, "latent_mas", q, gold, cfg, realign, use_cache,
-                                 lambda live, r: latent_messages(demo.tok, live, r, m)):
-            lat_r = res or lat_r
-            yield "", text_base + waiting, lat_base + msgs, totals, board
+        render_lat = lambda live, r: latent_messages(demo.tok, live, r, m)
+        try:
+            for res, msgs in _stream(demo, "latent_mas", q, gold, cfg, realign, use_cache, render_lat, flag):
+                lat_r = res or lat_r
+                yield "", text_base + waiting, lat_base + msgs, totals, board, show
+        except Interrupted as e:
+            yield "", text_base + skipped, lat_base + stopped(render_lat(e.live, None), e.live), totals, board, hide
+            return
         lat_final = lat_base + msgs
 
         text_r = None
-        for res, msgs in _stream(demo, "text_mas", q, gold, cfg, realign, use_cache,
-                                 lambda live, r: text_messages(demo.tok, live, r)):
-            text_r = res or text_r
-            yield "", text_base + msgs, lat_final, totals, board
+        render_txt = lambda live, r: text_messages(demo.tok, live, r)
+        try:
+            for res, msgs in _stream(demo, "text_mas", q, gold, cfg, realign, use_cache, render_txt, flag):
+                text_r = res or text_r
+                yield "", text_base + msgs, lat_final, totals, board, show
+        except Interrupted as e:
+            yield "", text_base + stopped(render_txt(e.live, None), e.live), lat_final, totals, board, hide
+            return
         totals = add_to_totals(totals, text_r, lat_r)
-        yield "", text_base + msgs, lat_final, totals, scoreboard(text_r, lat_r, totals)
+        yield "", text_base + msgs, lat_final, totals, scoreboard(text_r, lat_r, totals), hide
+
+    def stop_generation(request: gr.Request = None):
+        flag = demo.stops.get(_session(request))
+        if flag is not None:
+            flag.set()
 
     with gr.Blocks(title="Unspoken: agents that think without talking") as ui:
         gr.Markdown(
@@ -382,6 +429,7 @@ def build_ui(demo: Demo, examples: List[Dict], default_m: int, default_realign: 
         with gr.Row():
             msg = gr.Textbox(placeholder="Ask a math word problem…", show_label=False, scale=8,
                              autofocus=True, submit_btn=True)
+            stop_btn = gr.Button("⏹ Stop", variant="stop", scale=1, visible=False)
             clear = gr.Button("Clear", scale=1)
         gr.Examples([[it["question"]] for it in examples[:6]], inputs=[msg],
                     label="GSM8K examples (answers are scored against the gold answer)")
@@ -395,9 +443,12 @@ def build_ui(demo: Demo, examples: List[Dict], default_m: int, default_realign: 
                     "the prompts stay identical to the experiment's. One question is an illustration, "
                     "not evidence; H1 is tested on 1,319 problems by `scripts.analyze`.</sub>")
 
-        outputs = [msg, text_chat, lat_chat, totals, board]
+        outputs = [msg, text_chat, lat_chat, totals, board, stop_btn]
         msg.submit(respond, [msg, text_chat, lat_chat, totals, m, realign, use_cache], outputs)
-        clear.click(lambda: ("", [], [], {}, scoreboard(None, None, {})), None, outputs)
+        # queue=False: Stop must act immediately, not wait behind the running request.
+        stop_btn.click(stop_generation, None, None, queue=False)
+        clear.click(lambda: ("", [], [], {}, scoreboard(None, None, {}), gr.update(visible=False)),
+                    None, outputs)
     return ui
 
 

@@ -279,3 +279,32 @@ def test_demo_pretty_boxed_display_only():
     inline = "so \\(\\boxed{18}\\) dollars"
     block = "\\[\n\\boxed{36}\n\\]"
     assert pretty(inline) == inline and pretty(block) == block   # already math: untouched
+
+
+def test_demo_stop_aborts_and_caches_nothing(tiny, tmp_path, monkeypatch):
+    import threading
+    from scripts import demo as d
+    import src.modeling as modeling
+
+    model, _ = tiny
+    monkeypatch.setattr(d, "build_realign",
+                        lambda m, mode: modeling.build_realign(m, mode=mode, cache_dir=str(tmp_path)))
+    tok = FakeChatTokenizer()
+    cache = d.ResultCache(str(tmp_path / "c.json"))
+    app = d.Demo(model, tok, "tiny", cache, {"max_new_tokens": 4, "agent_max_tokens": 4})
+    cfg = d.make_cfg(2, max_new_tokens=4, agent_max_tokens=4)
+    q = "Tom has 3 apples and buys 2 more. How many?"
+
+    flag = threading.Event(); flag.set()
+    for method in ("text_mas", "latent_mas"):
+        with pytest.raises(d.Interrupted):
+            list(d._stream(app, method, q, "5", cfg, "full", True, lambda live, r: [], flag))
+    assert cache.data == {}                                   # nothing partial was cached
+
+    live = {"planner": [5, 6, 7], "_current": "planner"}
+    frozen = d.stopped(d.text_messages(tok, live, None), live)
+    assert frozen[0]["metadata"]["status"] == "done"
+    assert "Stopped** after 3 tokens" in frozen[-1]["content"]
+
+    ok = list(d._stream(app, "text_mas", q, "5", cfg, "full", True, lambda live, r: [], threading.Event()))
+    assert ok[-1][0] is not None and len(cache.data) == 1      # a later normal run still works

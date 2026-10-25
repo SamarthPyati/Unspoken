@@ -90,7 +90,7 @@ and H1 requires both.
 | **Open finding** | On Qwen2.5-3B, `latent_mas` is coherent at **m=1** (5/5) but broken at m=5 and at the default **m=10** (0/5); 1.5B breaks at m=10. Qwen3-4B (the reference's model family) stays coherent at m=10, so the code is correct. The dev sweep adds m ∈ {1,2,3}. See HANDOFF issue 4. |
 | Dev sweep (T6) | Attempt 1 failed (out of memory from leftover runs; results void). The notebook now guards against that. **Rerun pending:** `notebooks/kaggle_T6_dev.ipynb`, ~7.6 h. |
 | Demo | `python -m scripts.demo`: Gradio side by side of text vs latent MAS (T10) |
-| Next | T6 rerun → m chosen by the pre-registered rule → final runs (T7) → analysis (T9) |
+| Next | T6 rerun → m chosen by the pre-registered rule → `notebooks/kaggle_T7_final.ipynb` (ready) → analysis (T9) |
 
 ---
 
@@ -278,6 +278,15 @@ Sanity runs use the dev slice (`--split train --offset 5000`), never the test se
 picks `m` with the pre-registered rule in `scripts/select_m.py` and plans T7 with it. Use *Save & Run
 All (Commit)*. If the session ends early, add its output as an input to a new session and it resumes.
 
+**T7 final runs:** [`notebooks/kaggle_T7_final.ipynb`](notebooks/kaggle_T7_final.ipynb) runs the full
+test set (1,319 problems) for 3B and 1.5B: `single_cot`, `text_mas` and `latent_mas` at the `m` T6
+chose. Expect about 23–28 h, so 2–3 sessions.
+- **m is required:** set `FINAL_M` first. With T6's output attached, it checks `FINAL_M` matches T6's choice.
+- **Even coverage:** runs advance in rounds of 200 problems, so an interrupted session leaves every
+  method covering the same problems.
+- **Resume:** attach the previous session's output and it continues where it stopped.
+- **Result:** when every run reaches 1,319, it prints the H1 check and the change-log line.
+
 To plan runs from any timed results yourself:
 
 ```bash
@@ -353,6 +362,7 @@ scripts/
 notebooks/
   kaggle_T1_T3_T5.ipynb   one Kaggle session: tests, sanity runs, run plan
   kaggle_T6_dev.ipynb     dev sweep, m selection, T7 plan
+  kaggle_T7_final.ipynb   final test-set runs in 200-problem rounds, H1 check
   build_*.py              generators for the notebooks (edit these, not the .ipynb)
 tests/           pytest: data, metrics, mechanics (tiny random model), script guards
 spec/            CLAUDE.md, HANDOFF.md, docs/RESEARCH_CONTEXT.md

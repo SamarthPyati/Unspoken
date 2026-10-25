@@ -7,3 +7,4 @@ __pycache__/
 dist/
 .DS_Store
 unspoken_kaggle_*.zip
+objective.txt

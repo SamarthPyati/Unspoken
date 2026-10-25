@@ -15,7 +15,7 @@ which removes padding and position-id bugs (the most common way latent
 experiments silently break). Batch later, once results are trusted.
 """
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
 
 import torch
 from transformers import DynamicCache
@@ -63,12 +63,13 @@ def prefill(model, input_ids, cache, counter):
 
 @torch.no_grad()
 def latent_think(model, input_ids, cache, steps, w_a, target_norm, counter,
-                 collect: bool = False):
+                 collect: bool = False, on_step: Optional[Callable[[], None]] = None):
     """Prefill the agent's prompt, then think for `steps` latent steps.
 
     Returns the list of last-layer hidden states produced (only if collect=True;
     the cross-model adapter needs them). The cache is extended in place by
     len(prompt) + steps positions -- that cache IS the message to the next agent.
+    on_step (optional) is called after each latent step; it only observes, for the live demo.
     """
     out = prefill(model, input_ids, cache, counter)
     last_hidden = out.hidden_states[-1][:, -1, :]          # [1, d]
@@ -80,6 +81,8 @@ def latent_think(model, input_ids, cache, steps, w_a, target_norm, counter,
         out = _forward(model, cache, counter, inputs_embeds=embed)
         last_hidden = out.hidden_states[-1][:, -1, :]
         counter.latent_steps += 1
+        if on_step is not None:
+            on_step()
     if collect:
         collected.append(last_hidden.detach())
     return collected
@@ -103,12 +106,15 @@ def stop_token_ids(model, tokenizer) -> Set[int]:
 @torch.no_grad()
 def decode(model, tokenizer, input_ids, cache, counter, max_new_tokens=512,
            temperature: float = 0.0, generator: Optional[torch.Generator] = None,
-           inputs_embeds_prefix: Optional[torch.Tensor] = None) -> str:
+           inputs_embeds_prefix: Optional[torch.Tensor] = None,
+           on_token: Optional[Callable[[int], None]] = None) -> str:
     """Prefill `input_ids` on top of `cache`, then generate text.
 
     temperature=0 gives greedy (deterministic) decoding -- the default for
     all main experiments. inputs_embeds_prefix lets a different model's mapped
     latent thoughts be fed in first (used only by the hetero pipeline).
+    on_token (optional) is called with each generated token id; it only observes
+    (the live demo streams text with it) and never changes what is generated.
     """
     if inputs_embeds_prefix is not None:
         _forward(model, cache, counter, inputs_embeds=inputs_embeds_prefix)
@@ -126,6 +132,8 @@ def decode(model, tokenizer, input_ids, cache, counter, max_new_tokens=512,
         if token in stops:
             break
         generated.append(token)
+        if on_token is not None:
+            on_token(token)
         out = _forward(model, cache, counter, input_ids=next_id)
         logits = out.logits[:, -1, :]
     counter.output_tokens += len(generated)

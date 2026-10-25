@@ -47,6 +47,16 @@ class _Timer:
         self.peak_mb = sum(torch.cuda.max_memory_allocated(d) for d in self.cuda) / 2**20
 
 
+def _hooks(cfg, role):
+    """Optional observers for the live demo: cfg.callback(role, event, value), with event
+    "token" (value = token id) or "latent_step". Absent in experiments, and never able to
+    change what is generated, so measured runs are unaffected."""
+    cb = getattr(cfg, "callback", None)
+    if cb is None:
+        return None, None
+    return (lambda tok: cb(role, "token", tok)), (lambda: cb(role, "latent_step", None))
+
+
 def _result(output: str, counter: Counter, timer: _Timer, trace: Dict) -> Dict:
     return {
         "output": output,
@@ -66,7 +76,7 @@ def single_cot(model, tok, question, cfg) -> Dict:
     with _Timer(dev) as t:
         ids = encode_chat(tok, single_agent_messages(question), dev)
         out = decode(model, tok, ids, new_cache(), c, cfg.max_new_tokens,
-                     cfg.temperature, cfg.generator)
+                     cfg.temperature, cfg.generator, on_token=_hooks(cfg, "judger")[0])
     return _result(out, c, t, {})
 
 
@@ -79,7 +89,8 @@ def text_mas(model, tok, question, cfg) -> Dict:
         for role in PIPELINE:
             ids = encode_chat(tok, build_messages(role, question, context=transcript), dev)
             budget = cfg.max_new_tokens if role == "judger" else cfg.agent_max_tokens
-            text = decode(model, tok, ids, new_cache(), c, budget, cfg.temperature, cfg.generator)
+            text = decode(model, tok, ids, new_cache(), c, budget, cfg.temperature, cfg.generator,
+                          on_token=_hooks(cfg, role)[0])
             trace[role] = text
             if role != "judger":
                 transcript += f"[{role.title()}]\n{text}\n\n"
@@ -101,14 +112,16 @@ def latent_mas(model, tok, question, cfg, w_a, target_norm) -> Dict:
     with _Timer(dev) as t:
         for role in ([] if drop else PIPELINE[:-1]):
             ids = encode_chat(tok, build_messages(role, question, latent=True), dev)
-            latent_think(model, ids, cache, cfg.latent_steps, w_a, target_norm, c)
+            latent_think(model, ids, cache, cfg.latent_steps, w_a, target_norm, c,
+                         on_step=_hooks(cfg, role)[1])
         # Read the cache length BEFORE the judger runs: this is the size of the
         # latent message handed to the judger (earlier agents' prompts + latent
         # steps). After decode it would also include the judger's own prompt
         # and generated tokens (HANDOFF issue 2).
         cache_len_before_judger = cache.get_seq_length()
         ids = encode_chat(tok, build_messages("judger", question, latent=True), dev)
-        out = decode(model, tok, ids, cache, c, cfg.max_new_tokens, cfg.temperature, cfg.generator)
+        out = decode(model, tok, ids, cache, c, cfg.max_new_tokens, cfg.temperature, cfg.generator,
+                     on_token=_hooks(cfg, "judger")[0])
     return _result(out, c, t, {"cache_len_before_judger": cache_len_before_judger})
 
 

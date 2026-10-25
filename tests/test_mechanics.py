@@ -211,3 +211,71 @@ def test_demo_ui_builds(tiny, tmp_path):
                  {"max_new_tokens": 4, "agent_max_tokens": 4})
     ui = d.build_ui(app, [{"id": "x-0", "question": "What is 2+3?", "gold": "5"}], 5, "full")
     assert isinstance(ui, gr.Blocks)
+
+
+def test_callbacks_only_observe(tiny, tmp_path):
+    """The demo's streaming hooks must not change outputs or counts, and must see every
+    generated token and every latent step (invariant: one loop for all methods)."""
+    from types import SimpleNamespace
+    from src import pipelines
+
+    model, _ = tiny
+    tok = FakeChatTokenizer()
+    w_a, norm = build_realign(model, cache_dir=str(tmp_path))
+    q = "Tom has 3 apples and buys 2 more. How many?"
+    base = dict(max_new_tokens=5, agent_max_tokens=5, latent_steps=2, temperature=0.0,
+                generator=None, m0_cache="keep")
+    for name, run in (("text_mas", lambda cfg: pipelines.text_mas(model, tok, q, cfg)),
+                      ("latent_mas", lambda cfg: pipelines.latent_mas(model, tok, q, cfg, w_a, norm))):
+        events = []
+        plain = run(SimpleNamespace(**base))
+        hooked = run(SimpleNamespace(**base, callback=lambda role, ev, v: events.append((role, ev))))
+        for k in ("output", "output_tokens", "forward_passes", "latent_steps", "per_agent_tokens"):
+            assert plain[k] == hooked[k], (name, k)
+        assert sum(ev == "token" for _, ev in events) == hooked["output_tokens"]
+        assert sum(ev == "latent_step" for _, ev in events) == hooked["latent_steps"]
+
+
+def test_demo_chat_streams_and_renders(tiny, tmp_path, monkeypatch):
+    """Chat demo: streaming yields live bubbles and then the same result a plain run gives;
+    final bubbles carry the metrics; the scoreboard and session totals add up."""
+    from scripts import demo as d
+    import src.modeling as modeling
+
+    model, _ = tiny
+    monkeypatch.setattr(d, "build_realign",
+                        lambda m, mode: modeling.build_realign(m, mode=mode, cache_dir=str(tmp_path)))
+    tok = FakeChatTokenizer()
+    app = d.Demo(model, tok, "tiny", d.ResultCache(str(tmp_path / "c.json")),
+                 {"max_new_tokens": 4, "agent_max_tokens": 4})
+    cfg = d.make_cfg(2, max_new_tokens=4, agent_max_tokens=4)
+    q = "Tom has 3 apples and buys 2 more. How many?"
+
+    frames = list(d._stream(app, "text_mas", q, "5", cfg, "full", False,
+                            lambda live, r: d.text_messages(tok, live, r)))
+    text_r, final = frames[-1]
+    assert text_r is not None and all(res is None for res, _ in frames[:-1])
+    assert [m["metadata"]["title"].split()[1] for m in final[:3]] == ["Planner", "Critic", "Refiner"]
+    assert "tokens written" in final[-1]["content"] and "metadata" not in final[-1]
+    plain = app.run("text_mas", q, "5", cfg, "full", use_cache=False)
+    assert plain["output"] == text_r["output"] and plain["output_tokens"] == text_r["output_tokens"]
+
+    lat_r, lat_final = list(d._stream(app, "latent_mas", q, "5", cfg, "full", False,
+                                      lambda live, r: d.latent_messages(tok, live, r, 2)))[-1]
+    assert "6 latent steps, 0 tokens" in lat_final[0]["metadata"]["title"]
+    live = d.latent_messages(tok, {"_steps": 3}, None, 2)
+    assert live[0]["metadata"]["status"] == "pending" and "3 of 6" in live[0]["content"]
+
+    totals = d.add_to_totals({}, text_r, lat_r)
+    assert totals["n"] == 1 and totals["text_tok"] == text_r["output_tokens"] and totals["scored"] == 1
+    html = d.scoreboard(text_r, lat_r, totals)
+    assert "Tokens written" in html and "Session · 1 question" in html
+    assert "Ask a question" in d.scoreboard(None, None, {})
+
+
+def test_demo_pretty_boxed_display_only():
+    from scripts.demo import pretty
+    assert pretty("Final Answer:\n\n\\boxed{3}") == "Final Answer:\n\n\\[\\boxed{3}\\]"
+    inline = "so \\(\\boxed{18}\\) dollars"
+    block = "\\[\n\\boxed{36}\n\\]"
+    assert pretty(inline) == inline and pretty(block) == block   # already math: untouched

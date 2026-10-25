@@ -234,4 +234,9 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   `on_token` (latent.decode) and `on_step` (latent.latent_think), passed via `cfg.callback`; absent in
   experiments. `test_callbacks_only_observe` proves outputs, token counts and forward passes are
   identical with and without them. Display-only `\\boxed{}` rendering fix; scoring uses raw output.
+- 2026-10-25: Demo Stop button. Pressing it sets a per-session flag that the observe-only streaming
+  hook checks; the hook raises `Interrupted`, which unwinds decode/latent_think at the next token, so
+  the GPU is freed at once (a UI-only cancel would leave the model generating). Partial output is
+  shown as stopped and never cached or scored. Verified on 3B: stopped 0.37 s after the click, next
+  question served in 0.06 s, nothing partial cached. Test: `test_demo_stop_aborts_and_caches_nothing`.
 

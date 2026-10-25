@@ -84,7 +84,7 @@ and H1 requires both.
 
 | | |
 |---|---|
-| Tests | `pytest` green: 33 tests, including the KV-cache mechanics tests |
+| Tests | `pytest` green: 34 tests, including the KV-cache mechanics tests |
 | Kaggle (T1, T3, T5) | Done on 2x T4: tests green on CUDA, `requirements.lock` committed, sanity runs and run plan done |
 | Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
 | **Open finding** | On Qwen2.5-3B, `latent_mas` is coherent at **m=1** (5/5) but broken at m=5 and at the default **m=10** (0/5); 1.5B breaks at m=10. Qwen3-4B (the reference's model family) stays coherent at m=10, so the code is correct. The dev sweep adds m ∈ {1,2,3}. See HANDOFF issue 4. |
@@ -247,7 +247,9 @@ A chat with two answers to every question, side by side:
 - **Scoreboard:** tokens written, answer time and forward passes for this question, plus totals for
   the whole session (with accuracy on GSM8K examples, which are scored against the gold answer).
 
-Type any math word problem, or click one of the GSM8K examples. *Settings* (collapsed) holds `m`
+Type any math word problem, or click one of the GSM8K examples. **⏹ Stop** (shown while agents are
+generating) halts the model at the next token; the partial text stays visible, marked as stopped,
+and is never cached or scored. *Settings* (collapsed) holds `m`
 (default 1, the setting that is coherent on Qwen2.5-3B), the realign mode and cache replay.
 
 - Both columns run through the experiment's own `pipelines.text_mas` / `latent_mas` and scorer.

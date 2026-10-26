@@ -239,4 +239,12 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   the GPU is freed at once (a UI-only cancel would leave the model generating). Partial output is
   shown as stopped and never cached or scored. Verified on 3B: stopped 0.37 s after the click, next
   question served in 0.06 s, nothing partial cached. Test: `test_demo_stop_aborts_and_caches_nothing`.
+- 2026-10-26: **Deadline plan (option B), decided before these runs.** `notebooks/kaggle_quick_dev_test.ipynb`
+  (+ builder): reduced dev sweep on train 5,000-5,099 (n=100; text MAS, single CoT, latent m=1,2,3),
+  the pre-registered `select_m` rule with `--min_n 100`, then Qwen2.5-3B on test problems 0-299 (text
+  MAS, single CoT, latent at the chosen m) and an H1 *indication* on that subset. Deviations from the
+  plan, all for the deadline: dev n=100 not 300; dev grid m=1-3 only (m>=5 incoherent in every sanity
+  run); test subset evaluated before the full test run (the full T7 will reuse these 300 problems, not
+  re-run them). The paper reports these as deviations and calls the subset result an indication.
+  Every number in the paper must come from these runs or the logged sanity runs.
 

@@ -247,4 +247,15 @@ Checked on 16 Oct 2026 against `Gen-Verse/LatentMAS` (`models.py`, `methods/late
   run); test subset evaluated before the full test run (the full T7 will reuse these 300 problems, not
   re-run them). The paper reports these as deviations and calls the subset result an indication.
   Every number in the paper must come from these runs or the logged sanity runs.
+- 2026-10-26: Option B on Kaggle 2x T4 (commit dd45fbd, Qwen2.5-3B-Instruct): reduced dev sweep (train 5000-5099; text MAS, single CoT, latent m=[1, 2, 3]); pre-registered rule with --min_n 100 chose m=1; test subset 0-299. H1 indication on the test subset (300/300 problems, m=1): accuracy latent - text = -0.073 [95% CI -0.120, -0.023], McNemar p = 0.00456; output tokens saved = 75%; forward passes saved = 75%. Deviations (deadline): dev n=100 not 300, grid m=1-3, test subset reported before the full test run.
+- 2026-10-26: Option B outcome (recomputed from the raw JSONL, matches the notebook). Dev accuracy: text MAS
+  94%, single CoT 90%, latent m=1/2/3 = 82/69/42% (boxed rate 94/74/29%). Test 0-299: text MAS 84.7%,
+  single CoT 84.7%, latent m=1 77.3%; latent vs text -7.3 pts [-12.0, -2.3], discordant 17 vs 39,
+  p=0.005; tokens -75.2%, forward passes -74.5%, latency -74.8%. **H1 on the subset: token criterion
+  met, accuracy criterion not met under either reading (point or CI), so the point-vs-CI question is
+  moot here.** Latent m=1 errors are coherent wrong reasoning (34/39 boxed, no junk, none capped).
+  Text MAS agents hit the 256 cap 47% (dev) / 53% (test): handicaps the baseline (gap conservative).
+  Single CoT = text MAS accuracy at -63% tokens. Results imported to results/Qwen2.5-3B-Instruct/;
+  colliding older sanity files moved unchanged to results/_archive/ (see its README).
+  Summaries: spec/kaggle/option_b/.
 

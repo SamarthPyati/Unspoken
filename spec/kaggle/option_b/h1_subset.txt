@@ -1,0 +1,4 @@
+H1 indication on the test subset (300/300 problems, m=1): accuracy latent - text = -0.073 [95% CI -0.120, -0.023], McNemar p = 0.00456; output tokens saved = 75%; forward passes saved = 75%.
+  accuracy, point estimate >= -0.03: False
+  accuracy, CI lower bound >= -0.03: False
+  tokens saved >= 50%:              True

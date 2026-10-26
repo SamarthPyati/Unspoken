@@ -1,0 +1,6 @@
+   m  dev acc [95% CI]         n
+   1  0.820 [0.740,0.890]   100   <- chosen
+   2  0.690 [0.600,0.780]   100
+   3  0.420 [0.320,0.520]   100
+
+chosen m = 1. Next: python -m scripts.plan ... --final_m 1

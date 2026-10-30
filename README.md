@@ -31,48 +31,72 @@ writing to each other. The intermediate agents "think" in hidden-state space, an
 judger writes text. If accuracy holds, all of the inter-agent writing and re-reading disappears.
 H1 makes that concrete: at least 50% fewer output tokens, at most 3 points of accuracy lost.
 
-## Does it save tokens in the thinking process?
+## Results (Qwen2.5-3B, GSM8K, Kaggle T4)
 
-**Yes for the agents' intermediate thinking; mostly no for the final reasoning.** Measured on
-Kaggle T4, Qwen2.5-3B, 5 dev problems. These are sanity numbers, not results:
+**Short version: latent communication cut output tokens, forward passes and latency by about
+75%, but cost 7.3 accuracy points. H1 is half met.** These are real runs, not sanity checks, but on
+a reduced plan: under the deadline we ran a 100-problem dev sweep and the first 300 test problems
+(the plan and its deviations were logged in [`spec/HANDOFF.md`](spec/HANDOFF.md) before running).
 
-| Per problem | Text MAS | Latent MAS (m=1) | Judger alone (m=0 drop) |
+**Choosing m (dev sweep, 100 GSM8K train problems 5,000–5,099).** The pre-registered rule
+(`scripts/select_m.py`: highest dev accuracy, ties to the smaller m) picked **m = 1**:
+
+| Method | Dev accuracy [95% CI] | Answers ending in `\boxed{}` |
+|---|---|---|
+| Text MAS | 94% [89, 98] | 99% |
+| Single CoT | 90% [84, 95] | 94% |
+| **Latent MAS, m = 1** | **82% [74, 89]** | 94% |
+| Latent MAS, m = 2 | 69% [60, 78] | 74% |
+| Latent MAS, m = 3 | 42% [32, 52] | 29% |
+
+**Test subset (GSM8K test problems 0–299, used once, m = 1).** Means per problem:
+
+| Method | Accuracy [95% CI] | Output tokens | Forward passes | Latency |
+|---|---|---|---|---|
+| Text MAS (baseline) | 84.7% [80.7, 88.7] | 882 | 886 | 44.9 s |
+| **Latent MAS, m = 1** | **77.3% [72.3, 82.0]** | **219 (−75%)** | **226 (−75%)** | **11.3 s (−75%)** |
+| Single-agent CoT | 84.7% [80.3, 88.7] | 328 | 329 | 17.0 s |
+
+**H1 on the test subset:**
+
+| Criterion | Threshold | Measured | Met? |
 |---|---|---|---|
-| Planner + critic + refiner write | **550 tokens** (102 + 253 + 195) | **0 tokens** (3 latent steps instead) | – |
-| Judger writes | 194 tokens | 180 tokens | 246 tokens |
-| **Output tokens, total** | **744** | **180 (−76%)** | 246 |
-| Prompt tokens read | 1,410 | 402 (−71%) | 100 |
-| Forward passes | 748 | 187 (−75%) | 247 |
-| Latency | 40.3 s | 9.9 s (−75%) | 12.6 s |
-| Correct | 5/5 | 5/5 | 5/5 |
+| Output tokens saved | ≥ 50% | 75% | **yes** |
+| Accuracy, latent − text | ≥ −3 points | −7.3 [−12.0, −2.3], McNemar p = 0.005 | **no** (point estimate and CI) |
 
-What the table shows:
+Text MAS alone was right on 39 problems, latent MAS alone on 17. Peak GPU memory was about the same
+(6.1 vs 6.4 GB).
 
-1. **The intermediate thinking becomes free in tokens.** In text MAS, 74% of all output tokens
-   (550 of 744) are agents writing to each other. In latent MAS that thinking is done in hidden
-   space: each latent step is one forward pass that writes no token. Re-reading goes too: the
-   prompt tokens drop from 1,410 to 402 because no transcript is pasted forward.
-2. **The judger still reasons in text.** Its chain of thought is about the same length either way
-   (194 vs 180 tokens). The method removes inter-agent *messages*, not the final written reasoning.
-   Compressing a single model's own chain of thought into latent steps is a different line of work
-   (e.g. Coconut, "reasoning in continuous latent space") and is out of scope here.
-3. **The latent context may shorten that reasoning a little.** With the earlier agents' latent
-   work in its cache, the judger wrote 180 tokens instead of 246 on its own. With n=5 this is only
-   a hint; the dev sweep (T6) will tell.
+### What the numbers show
 
-**Thinking in latent space is not free in compute.** A latent step costs the same forward pass as
-a generated token; it just doesn't produce one. That's why this project always reports **forward
-passes and latency next to tokens** (invariant 5). At m=1 the savings are real on both counts: 3
-latent passes replace about 550 generated tokens. At larger m the tokens stay low, but on Qwen2.5-3B
-the answers fall apart (m=5 and m=10 scored 0/5). So "fewer tokens" only counts when accuracy holds,
-and H1 requires both.
+1. **Most multi-agent tokens are agents talking to each other.** In text MAS, 72% of output tokens
+   (635 of 882: planner 158, critic 253, refiner 224) are inter-agent messages; the judger's answer
+   is 246. Each agent also re-reads the transcript: 1,662 prompt tokens per problem, against 454 for
+   latent MAS.
+2. **Latent MAS removes that writing, so the saving is real in compute too.** Only the judger
+   writes text; the three latent steps (m = 1) replace about 635 generated tokens. Forward passes
+   and latency fall by the same 75% as tokens.
+3. **The judger still reasons in text.** The method removes inter-agent *messages*, not the final
+   written reasoning. Compressing a single model's own chain of thought into latent steps is a
+   different line of work (e.g. Coconut) and out of scope here.
+4. **On small models, more latent steps break the answer.** Dev accuracy falls from 82% (m = 1) to
+   42% (m = 3), and the share of answers that even end in `\boxed{}` falls with it. Qwen3-4B (the
+   reference's model family) stays coherent at m = 10 and fp32 fails like fp16, so this is a
+   small-model effect, not a bug. At m = 1 the latent errors are coherent solutions with a wrong
+   number, not garbled text.
+5. **Two caveats.** 53% of text-MAS agent messages hit the 256-token cap, which handicaps the text
+   baseline. And single-agent CoT matched text MAS at about a third of its tokens, so on GSM8K at
+   this scale the multi-agent setup itself buys no accuracy.
 
 **Trade-offs:**
 - **Interpretability:** you can read a critic's text, but you can't read a latent step.
-- **Memory:** the latent positions sit in the KV cache, and peak GPU memory is about the same
-  (≈6.1 vs 6.4 GB on 3B).
+- **Compute is not free:** each latent step is a full forward pass; it just writes no token. That
+  is why this project always reports forward passes and latency next to tokens.
 - **Same model only:** a KV cache can't move between different models; that is what our adapter
-  extension explores.
+  extension explores (smoke-tested only: held-out cosine 0.676).
+
+**Not yet run** (pre-registered, left for later): all 1,319 test problems, the 1.5B repeat, the
+heterogeneous 1.5B → 3B run with a full adapter fit, and the realign and m = 0 ablations.
 
 **Before changing anything, read** [`spec/CLAUDE.md`](spec/CLAUDE.md) (rules and invariants),
 [`spec/HANDOFF.md`](spec/HANDOFF.md) (status, open issues, task queue, change log) and
@@ -80,17 +104,15 @@ and H1 requires both.
 
 ---
 
-## Status (24 Oct 2026)
+## Status (30 Oct 2026)
 
 | | |
 |---|---|
 | Tests | `pytest` green: 34 tests, including the KV-cache mechanics tests |
-| Kaggle (T1, T3, T5) | Done on 2x T4: tests green on CUDA, `requirements.lock` committed, sanity runs and run plan done |
-| Baselines | `single_cot` and `text_mas` give coherent, boxed answers |
-| **Open finding** | On Qwen2.5-3B, `latent_mas` is coherent at **m=1** (5/5) but broken at m=5 and at the default **m=10** (0/5); 1.5B breaks at m=10. Qwen3-4B (the reference's model family) stays coherent at m=10, so the code is correct. The dev sweep adds m ∈ {1,2,3}. See HANDOFF issue 4. |
-| Dev sweep (T6) | Attempt 1 failed (out of memory from leftover runs; results void). The notebook now guards against that. **Rerun pending:** `notebooks/kaggle_T6_dev.ipynb`, ~7.6 h. |
-| Demo | `python -m scripts.demo`: chat with text agents vs Unspoken side by side, live token counts and a savings scoreboard |
-| Next | T6 rerun → m chosen by the pre-registered rule → `notebooks/kaggle_T7_final.ipynb` (ready) → analysis (T9) |
+| Kaggle runs | Option B done on 2x T4 (4.99 h): dev sweep (100 problems), m chosen by the rule, test subset (300 problems). Raw outputs in `spec/kaggle/option_b/` |
+| Result | H1 half met on 3B: −75% tokens, −7.3 accuracy points (see Results above) |
+| Demo | `python -m scripts.demo`: chat with text agents vs Unspoken side by side, live token counts, a savings scoreboard and a Stop button |
+| Next | Full test set (`notebooks/kaggle_T7_final.ipynb`, `FINAL_M = 1`), 1.5B repeat, text MAS with a higher token cap, adapter full fit |
 
 ---
 
@@ -258,7 +280,7 @@ and is never cached or scored. *Settings* (collapsed) holds `m`
   identical to the experiment's.
 - The methods run one after the other on the same GPU (latent first), and each shows its own time.
 - Results are cached in `cache/demo_results.json`; precompute what you will show live.
-- For honesty, also show `m=10` (the pre-registered default, which breaks on Qwen2.5-3B).
+- For honesty, also show a larger `m` (m=3 already breaks on Qwen2.5-3B; m=10 is the pre-registered default).
   One question illustrates the mechanism; it is not evidence for H1.
 
 ### Kaggle (T4 x2)
@@ -286,6 +308,11 @@ Sanity runs use the dev slice (`--split train --offset 5000`), never the test se
 (m ∈ {0,1,2,3,5,10,20,40}, the realign and m=0 ablations, both baselines; ~7.6 h on 2x T4). It then
 picks `m` with the pre-registered rule in `scripts/select_m.py` and plans T7 with it. Use *Save & Run
 All (Commit)*. If the session ends early, add its output as an input to a new session and it resumes.
+
+**Option B (deadline plan, what produced the results above):**
+[`notebooks/kaggle_quick_dev_test.ipynb`](notebooks/kaggle_quick_dev_test.ipynb) runs a reduced dev
+sweep (100 problems, m ∈ {1,2,3} plus both baselines), picks `m` with `scripts/select_m.py --min_n 100`,
+then runs the three methods on test problems 0–299 and prints the H1 check (~5 h on 2x T4).
 
 **T7 final runs:** [`notebooks/kaggle_T7_final.ipynb`](notebooks/kaggle_T7_final.ipynb) runs the full
 test set (1,319 problems) for 3B and 1.5B: `single_cot`, `text_mas` and `latent_mas` at the `m` T6
@@ -371,6 +398,7 @@ scripts/
 notebooks/
   kaggle_T1_T3_T5.ipynb   one Kaggle session: tests, sanity runs, run plan
   kaggle_T6_dev.ipynb     dev sweep, m selection, T7 plan
+  kaggle_quick_dev_test.ipynb  option B: reduced dev sweep, m rule, test subset 0-299
   kaggle_T7_final.ipynb   final test-set runs in 200-problem rounds, H1 check
   build_*.py              generators for the notebooks (edit these, not the .ipynb)
 tests/           pytest: data, metrics, mechanics (tiny random model), script guards
